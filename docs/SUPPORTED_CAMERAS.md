@@ -538,10 +538,10 @@ Dahua cameras configured with ONVIF URLs (`?subtype=MediaProfile00002`) do **NOT
 
 ```
 # WRONG — no backchannel
-rtsp://admin:password@10.1.2.8?subtype=MediaProfile00002
+rtsp://admin:password@<camera-ip>?subtype=MediaProfile00002
 
 # CORRECT — backchannel available
-rtsp://admin:password@10.1.2.8:554/cam/realmonitor?channel=1&subtype=2&unicast=true&proto=Onvif
+rtsp://admin:password@<camera-ip>:554/cam/realmonitor?channel=1&subtype=2&unicast=true&proto=Onvif
 ```
 
 This is a go2rtc/Dahua firmware behavior — the ONVIF RTSP profile simply doesn't include the backchannel media description in the SDP response.
