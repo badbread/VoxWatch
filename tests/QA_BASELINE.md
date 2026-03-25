@@ -172,7 +172,7 @@ codebase changes.
 - frigate.host: "localhost", port: 5000
 - go2rtc.host: "localhost", api_port: 1984
 - conditions.min_score: 0.7, cooldown_seconds: 60
-- ai.primary: gemini-3.1-flash, fallback: ollama/llava:7b
+- ai.primary: gemini-2.5-flash, fallback: ollama/llava:7b
 - tts.engine: "piper", model: "en_US-lessac-medium"
 - audio.codec: "pcm_mulaw", sample_rate: 8000
 - response_mode.name: "private_security"

@@ -304,7 +304,7 @@ class GenerateConfigRequest(BaseModel):
 
     AI:
         ai_provider:     Primary AI provider (e.g. 'gemini', 'openai').
-        ai_model:        Model name (e.g. 'gemini-3.1-flash').
+        ai_model:        Model name (e.g. 'gemini-2.5-flash').
         ai_api_key:      API key for the primary provider.
 
     TTS:
@@ -361,7 +361,7 @@ class GenerateConfigRequest(BaseModel):
         description="Primary AI vision provider (gemini, openai, ollama, etc.).",
     )
     ai_model: str = Field(
-        default="gemini-3.1-flash",
+        default="gemini-2.5-flash",
         description="Model name for the primary AI provider.",
     )
     ai_api_key: str = Field(

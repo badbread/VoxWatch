@@ -85,7 +85,7 @@ def _apply_defaults(config: dict) -> dict:
     ai = config.setdefault("ai", {})
     primary = ai.setdefault("primary", {})
     primary.setdefault("provider", "gemini")
-    primary.setdefault("model", "gemini-3.1-flash")
+    primary.setdefault("model", "gemini-2.5-flash")
     primary.setdefault("api_key", "${GEMINI_API_KEY}")
     primary.setdefault("timeout_seconds", 5)
     fallback = ai.setdefault("fallback", {})
