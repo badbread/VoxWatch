@@ -1,0 +1,32 @@
+<svg width="1200" height="400" viewBox="0 0 1200 400" xmlns="http://www.w3.org/2000/svg">
+<rect width="1200" height="400" fill="#0F172A"/>
+
+<!-- subtle grid -->
+<g stroke="#1E293B" stroke-width="1">
+  <path d="M0 100 H1200 M0 200 H1200 M0 300 H1200"/>
+  <path d="M200 0 V400 M400 0 V400 M600 0 V400 M800 0 V400 M1000 0 V400"/>
+</g>
+
+<!-- icon -->
+<g stroke="#60A5FA" stroke-width="6" fill="none" stroke-linecap="square">
+  <path d="M200 120 H260 M200 120 V180"/>
+  <path d="M340 120 H280 M340 120 V180"/>
+  <path d="M200 280 H260 M200 280 V220"/>
+  <path d="M340 280 H280 M340 280 V220"/>
+</g>
+
+<!-- waveform -->
+<polyline points="240,200 260,200 275,170 290,230 305,190 320,210 340,200"
+ fill="none" stroke="#F59E0B" stroke-width="6"/>
+
+<!-- title -->
+<text x="420" y="190" font-family="JetBrains Mono, monospace" font-size="64" fill="#93C5FD">
+voxwatch
+</text>
+
+<!-- tagline -->
+<text x="420" y="240" font-family="JetBrains Mono, monospace" font-size="24" fill="#64748B">
+audio-aware surveillance for frigate + homelab
+</text>
+
+</svg>

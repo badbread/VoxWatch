@@ -1,0 +1,17 @@
+# Prevent secrets and dev artifacts from being copied into Docker images
+config/deploy-config.yaml
+.git
+.gitignore
+.env
+*.env
+.env.*
+tests/
+docs/
+*.md
+LICENSE
+.claude/
+__pycache__/
+*.pyc
+node_modules/
+.vite/
+dist/

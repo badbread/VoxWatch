@@ -1,0 +1,25 @@
+# Audio test output files
+*.wav
+*.raw
+*.mp3
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets — never commit credentials
+.env
+*.env
+credentials.*
+config/deploy-config.yaml

@@ -1,0 +1,61 @@
+# VoxWatch Dashboard — Docker Compose
+#
+# Runs alongside the VoxWatch core container on the same Docker host.
+# Shares the /config and /data volumes so it can read/write config.yaml
+# and read status.json + events.jsonl written by the core service.
+#
+# Default port: 33344
+#
+# For Portainer deployment: paste this as a stack with inline env vars.
+# ALL env vars must be inline — Portainer doesn't support env_file.
+
+version: '3.8'
+
+services:
+  voxwatch-dashboard:
+    container_name: voxwatch-dashboard
+    image: voxwatch-dashboard:latest
+    restart: unless-stopped
+
+    # Host networking so we can reach MQTT, Frigate, and go2rtc on localhost
+    # (all run on the same Docker LXC host)
+    network_mode: host
+
+    environment:
+      # Dashboard port — change if 33344 conflicts with something
+      - "DASHBOARD_PORT=33344"
+
+      # Path to VoxWatch config file (shared volume)
+      - "VOXWATCH_CONFIG_PATH=/config/config.yaml"
+
+      # Path to VoxWatch data directory (status.json, events.jsonl)
+      - "VOXWATCH_DATA_PATH=/data"
+
+      # Service connection defaults (override if not on localhost)
+      - "MQTT_HOST=localhost"
+      - "MQTT_PORT=1883"
+      - "FRIGATE_HOST=localhost"
+      - "FRIGATE_PORT=5000"
+      - "GO2RTC_HOST=localhost"
+      - "GO2RTC_PORT=1984"
+
+      # Timezone
+      - "TZ=America/Los_Angeles"
+
+    volumes:
+      # Shared config — read-write so the config editor can save changes
+      - /volume1/docker/voxwatch/config:/config
+
+      # Shared data — read-only for status.json and events.jsonl
+      - /volume1/docker/voxwatch/data:/data:ro
+
+    # Lightweight — the dashboard is just an API server + static files
+    mem_limit: 256m
+    cpus: 1.0
+
+    # Docker log rotation — prevents container logs from filling the disk
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"

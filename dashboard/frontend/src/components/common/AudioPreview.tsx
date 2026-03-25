@@ -1,0 +1,226 @@
+/**
+ * AudioPreview — shared browser-based audio playback widget.
+ *
+ * Used by PersonaConfigForm and TtsConfigForm to let users hear what a
+ * deterrent message sounds like before committing to a voice / persona
+ * combination.  Audio is played entirely in the browser — nothing is sent
+ * to a camera speaker.
+ *
+ * States:
+ *   idle      — no audio yet; shows the trigger button supplied by the parent
+ *   loading   — synthesis in progress; shows spinner
+ *   ready     — WAV blob received; shows Play / pause controls + latency badge
+ *   playing   — audio is currently playing; shows Pause button
+ *   error     — synthesis or network error; shows error message
+ *
+ * Layout:
+ *   - Full-width panel that fits inside existing card sections
+ *   - Large tap targets on all interactive elements (mobile-friendly)
+ *   - Matches the dashboard dark theme via Tailwind dark: variants
+ *
+ * Usage:
+ *   <AudioPreview
+ *     audioBlob={blob}
+ *     isLoading={isPending}
+ *     error={errorMessage}
+ *     generationTimeMs={elapsed}
+ *   />
+ */
+
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { Play, Pause, Volume2, AlertCircle } from 'lucide-react';
+import { LoadingSpinner } from '@/components/common/LoadingSpinner';
+import { cn } from '@/utils/cn';
+
+/** Props for the AudioPreview component. */
+export interface AudioPreviewProps {
+  /**
+   * WAV audio blob received from the preview API.
+   * Null when no audio has been generated yet or while loading.
+   */
+  audioBlob: Blob | null;
+  /** Whether synthesis is currently in progress. */
+  isLoading: boolean;
+  /** Error message to display.  Null when there is no error. */
+  error: string | null;
+  /** Synthesis latency shown as a badge.  Undefined hides the badge. */
+  generationTimeMs?: number | undefined;
+}
+
+/**
+ * In-browser audio preview widget.
+ *
+ * Creates an object URL from the WAV blob and plays it using the Web Audio API.
+ * The object URL is revoked when the component unmounts or when a new blob
+ * arrives to avoid memory leaks.
+ *
+ * @example
+ * ```tsx
+ * <AudioPreview
+ *   audioBlob={wavBlob}
+ *   isLoading={false}
+ *   error={null}
+ *   generationTimeMs={842}
+ * />
+ * ```
+ */
+export function AudioPreview({
+  audioBlob,
+  isLoading,
+  error,
+  generationTimeMs,
+}: AudioPreviewProps) {
+  /** HTMLAudioElement instance used for playback. */
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  /** Object URL created from the latest blob.  Tracked for cleanup. */
+  const objectUrlRef = useRef<string | null>(null);
+  /** Whether audio is currently playing. */
+  const [isPlaying, setIsPlaying] = useState(false);
+
+  /**
+   * Revoke the previous object URL and create a new one from the blob.
+   * Runs whenever the audioBlob prop changes.
+   */
+  useEffect(() => {
+    // Clean up old object URL to avoid memory leaks.
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = null;
+    }
+    setIsPlaying(false);
+
+    if (!audioBlob) return;
+
+    const url = URL.createObjectURL(audioBlob);
+    objectUrlRef.current = url;
+
+    // Create (or reuse) the audio element.
+    if (!audioRef.current) {
+      audioRef.current = new Audio();
+    }
+    audioRef.current.src = url;
+    audioRef.current.load();
+  }, [audioBlob]);
+
+  /** Revoke the object URL on unmount to free memory. */
+  useEffect(() => {
+    return () => {
+      if (objectUrlRef.current) {
+        URL.revokeObjectURL(objectUrlRef.current);
+      }
+      audioRef.current?.pause();
+    };
+  }, []);
+
+  /** Wire up audio ended / error events to keep isPlaying in sync. */
+  useEffect(() => {
+    const el = audioRef.current;
+    if (!el) return;
+
+    const onEnded = () => setIsPlaying(false);
+    const onError = () => setIsPlaying(false);
+
+    el.addEventListener('ended', onEnded);
+    el.addEventListener('error', onError);
+    return () => {
+      el.removeEventListener('ended', onEnded);
+      el.removeEventListener('error', onError);
+    };
+  });
+
+  /** Toggle play / pause on the audio element. */
+  const handleTogglePlay = useCallback(() => {
+    const el = audioRef.current;
+    if (!el) return;
+
+    if (isPlaying) {
+      el.pause();
+      setIsPlaying(false);
+    } else {
+      // Rewind to start if the track finished.
+      if (el.ended) el.currentTime = 0;
+      el.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
+    }
+  }, [isPlaying]);
+
+  // ── Render: loading state ─────────────────────────────────────────────────
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-3 rounded-xl border border-blue-200 bg-blue-50/60 px-4 py-3 dark:border-blue-800/40 dark:bg-blue-950/20">
+        <LoadingSpinner size="h-5 w-5" className="flex-shrink-0 text-blue-500" />
+        <p className="text-sm text-blue-700 dark:text-blue-300">
+          Generating audio preview...
+        </p>
+      </div>
+    );
+  }
+
+  // ── Render: error state ───────────────────────────────────────────────────
+  if (error) {
+    return (
+      <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50/60 px-4 py-3 dark:border-red-800/40 dark:bg-red-950/20">
+        <AlertCircle
+          className="mt-0.5 h-5 w-5 flex-shrink-0 text-red-500"
+          aria-hidden="true"
+        />
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-red-700 dark:text-red-300">
+            Preview failed
+          </p>
+          <p className="mt-0.5 break-words text-xs text-red-600 dark:text-red-400">
+            {error}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Render: audio ready ───────────────────────────────────────────────────
+  if (audioBlob) {
+    return (
+      <div className="flex items-center gap-3 rounded-xl border border-green-200 bg-green-50/60 px-4 py-3 dark:border-green-800/40 dark:bg-green-950/20">
+        {/* Play / Pause button — large tap target for mobile */}
+        <button
+          type="button"
+          onClick={handleTogglePlay}
+          aria-label={isPlaying ? 'Pause preview' : 'Play preview'}
+          className={cn(
+            'flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full',
+            'transition-all active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-500',
+            isPlaying
+              ? 'bg-green-500 text-white hover:bg-green-600'
+              : 'bg-white text-green-700 shadow-sm ring-1 ring-green-300 hover:bg-green-50 dark:bg-green-900/40 dark:text-green-300 dark:ring-green-700 dark:hover:bg-green-900/60',
+          )}
+        >
+          {isPlaying ? (
+            <Pause className="h-5 w-5" aria-hidden="true" />
+          ) : (
+            <Play className="ml-0.5 h-5 w-5" aria-hidden="true" />
+          )}
+        </button>
+
+        <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5">
+            <Volume2 className="h-4 w-4 flex-shrink-0 text-green-600 dark:text-green-400" aria-hidden="true" />
+            <p className="text-sm font-medium text-green-700 dark:text-green-300">
+              {isPlaying ? 'Playing...' : 'Preview ready'}
+            </p>
+          </div>
+
+          {/* Generation latency badge */}
+          {generationTimeMs !== undefined && (
+            <span className="flex-shrink-0 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700 dark:bg-green-900/40 dark:text-green-300">
+              {generationTimeMs < 1000
+                ? `${generationTimeMs}ms`
+                : `${(generationTimeMs / 1000).toFixed(1)}s`}
+            </span>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Render: idle (nothing to show) ───────────────────────────────────────
+  // Return null — the parent renders its own trigger button in the idle state.
+  return null;
+}

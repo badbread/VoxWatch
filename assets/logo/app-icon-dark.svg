@@ -1,0 +1,11 @@
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges">
+<rect x="0" y="0" width="200" height="200" rx="32" ry="32" fill="#0F172A"/>
+<!-- filled corner brackets -->
+<path d="M56 56 H92 V64 H64 V92 H56 Z" fill="#60A5FA"/>
+<path d="M144 56 H108 V64 H136 V92 H144 Z" fill="#60A5FA"/>
+<path d="M56 144 H92 V136 H64 V108 H56 Z" fill="#60A5FA"/>
+<path d="M144 144 H108 V136 H136 V108 H144 Z" fill="#60A5FA"/>
+<!-- waveform -->
+<polyline points="72,100 84,100 92,84 100,116 108,96 116,104 128,100"
+          fill="none" stroke="#F59E0B" stroke-width="4" stroke-linecap="square"/>
+</svg>

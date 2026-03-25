@@ -1,0 +1,322 @@
+# =============================================================================
+# VoxWatch Configuration
+# =============================================================================
+# Copy this file and customize for your environment.
+# Environment variables can be referenced with ${VAR} or ${VAR:default} syntax.
+
+# Frigate NVR connection
+frigate:
+  host: "localhost"           # Frigate hostname or IP (localhost when on same host)
+  port: 5000                   # Frigate API port
+  mqtt_host: "localhost"       # MQTT broker hostname (localhost when on same host)
+  mqtt_port: 1883              # MQTT broker port
+  mqtt_topic: "frigate/events" # Frigate MQTT event topic
+
+# go2rtc connection (for audio push to camera speakers)
+go2rtc:
+  host: "localhost"            # go2rtc hostname or IP (localhost when on same host)
+  api_port: 1984               # go2rtc HTTP API port
+
+# Cameras to monitor (names must match Frigate camera names)
+cameras:
+  frontdoor:
+    enabled: true
+    go2rtc_stream: "frontdoor"  # Stream name in go2rtc config
+    # Optional per-camera audio codec override — leave commented to use global audio settings.
+    # Reolink cameras typically use pcm_mulaw; Dahua cameras typically use pcm_alaw.
+    # audio_codec: "pcm_mulaw"  # ffmpeg codec name (overrides audio.codec for this camera)
+    # sample_rate: 8000          # Hz (overrides audio.sample_rate for this camera)
+    # channels: 1                # 1=mono, 2=stereo (overrides audio.channels for this camera)
+  # Add more cameras as needed:
+  # backyard:
+  #   enabled: true
+  #   go2rtc_stream: "backyard"
+  #   audio_codec: "pcm_alaw"   # Dahua camera — uses A-law instead of mu-law
+
+# Detection conditions — all must be true to trigger the deterrent
+conditions:
+  min_score: 0.7               # Minimum Frigate detection confidence (0.0-1.0)
+  cooldown_seconds: 60         # Per-camera cooldown between triggers
+  active_hours:
+    mode: "always"             # "always" (24/7), "sunset_sunrise", or "fixed"
+    # Fixed hours (only used if mode is "fixed")
+    start: "22:00"
+    end: "06:00"
+  # Latitude/longitude for sunset/sunrise calculation (only if mode is "sunset_sunrise")
+  latitude: 37.7749
+  longitude: -122.4194
+
+# AI Vision — image and video analysis
+#
+# Supported providers:
+#   gemini    — Google Gemini Flash (cloud, supports multi-image and video)
+#               Required fields: api_key, model
+#   openai    — OpenAI vision API (cloud, multi-image, snapshot-only for Stage 3)
+#               Required fields: api_key, model (e.g. "gpt-4o")
+#   grok      — xAI Grok vision API (cloud, multi-image, snapshot-only for Stage 3)
+#               Required fields: api_key, model (e.g. "grok-2-vision-1212")
+#   anthropic — Anthropic Claude vision API (cloud, multi-image, snapshot-only for Stage 3)
+#               Required fields: api_key, model (e.g. "claude-3-5-haiku-20241022")
+#   ollama    — Local Ollama vision model (single-image only, snapshot-only for Stage 3)
+#               Required fields: host, model
+#   custom    — Any OpenAI-compatible REST endpoint (multi-image, snapshot-only for Stage 3)
+#               Required fields: api_key, model, host (base URL without trailing slash)
+#
+# Only "gemini" supports direct video analysis in Stage 3.  All other providers
+# automatically use snapshot fallback when a video clip is available.
+ai:
+  # Primary: Google Gemini Flash (fast cloud API, supports video)
+  primary:
+    provider: "gemini"
+    model: "gemini-2.0-flash"
+    api_key: "${GEMINI_API_KEY}"   # Set via environment variable
+    timeout_seconds: 5
+  # Fallback: Local Ollama with LLaVA (no cloud dependency)
+  fallback:
+    provider: "ollama"
+    model: "llava:7b"
+    host: "http://localhost:11434"
+    timeout_seconds: 8
+
+  # Example alternative primary configs (uncomment and replace the block above):
+  #
+  # OpenAI gpt-4o:
+  # primary:
+  #   provider: "openai"
+  #   model: "gpt-4o"
+  #   api_key: "${OPENAI_API_KEY}"
+  #   timeout_seconds: 10
+  #
+  # xAI Grok:
+  # primary:
+  #   provider: "grok"
+  #   model: "grok-2-vision-1212"
+  #   api_key: "${GROK_API_KEY}"
+  #   timeout_seconds: 10
+  #
+  # Anthropic Claude:
+  # primary:
+  #   provider: "anthropic"
+  #   model: "claude-3-5-haiku-20241022"
+  #   api_key: "${ANTHROPIC_API_KEY}"
+  #   timeout_seconds: 10
+  #
+  # Custom OpenAI-compatible endpoint:
+  # primary:
+  #   provider: "custom"
+  #   model: "my-vision-model"
+  #   api_key: "${CUSTOM_API_KEY}"
+  #   host: "http://my-inference-server:8080/v1"
+  #   timeout_seconds: 15
+
+# Stage 2 — AI snapshot analysis settings
+stage2:
+  snapshot_count: 3             # Number of snapshots to send to AI
+  snapshot_interval_ms: 1000    # Interval between additional snapshots (ms)
+
+# Stage 3 — AI behavioral analysis settings
+stage3:
+  enabled: true
+  video_clip_seconds: 5        # Length of video clip to analyze
+  person_still_present_check: true  # Only fire if person still detected
+  fallback_to_snapshots: true  # If video clip unavailable, use snapshots
+  fallback_snapshot_count: 5
+
+# Text-to-Speech — multi-provider system with automatic fallback
+#
+# Supported providers:
+#   piper      — Local Piper neural TTS (default, bundled in Docker image)
+#   espeak     — Local espeak-ng (robotic, always available in Docker image)
+#   kokoro     — Local Kokoro ONNX neural TTS (install kokoro-onnx separately)
+#   elevenlabs — ElevenLabs cloud TTS (requires ELEVENLABS_API_KEY)
+#   cartesia   — Cartesia Sonic cloud TTS (requires CARTESIA_API_KEY)
+#   polly      — Amazon Polly cloud TTS (requires AWS credentials)
+#   openai     — OpenAI TTS cloud API (requires OPENAI_API_KEY)
+#
+# fallback_chain: ordered list of providers to try if the primary fails.
+# The chain is walked in order until one succeeds; espeak is a reliable
+# last resort because it is always available in the Docker image.
+tts:
+  provider: "kokoro"
+  fallback_chain: ["piper", "espeak"]
+  piper:
+    model: "en_US-lessac-medium"
+    speed: 1.0
+  kokoro:
+    host: "http://localhost:8880"
+    voice: "af_heart"
+    speed: 1.0
+  elevenlabs:
+    api_key: "${ELEVENLABS_API_KEY}"
+    voice_id: ""
+    model: "eleven_flash_v2_5"
+    stability: 0.7
+    similarity_boost: 0.8
+    use_streaming: true
+  cartesia:
+    api_key: "${CARTESIA_API_KEY}"
+    voice_id: ""
+    model: "sonic-2024-12-12"
+    speed: 1.0
+  polly:
+    aws_region: "us-west-2"
+    voice_id: "Matthew"
+    engine: "neural"
+  openai:
+    api_key: "${OPENAI_API_KEY}"
+    model: "tts-1"
+    voice: "onyx"
+    speed: 1.0
+  espeak:
+    speed: 130
+    pitch: 30
+
+# Audio output format — must match camera backchannel codec
+# Reolink CX410 uses pcm_mulaw (G.711 mu-law), other models may use pcm_alaw
+audio:
+  codec: "pcm_mulaw"
+  sample_rate: 8000
+  channels: 1
+  # Attention tone played before TTS speech on every stage (global default).
+  # Built-in options: "none" (disabled), "short" (0.5s 800Hz beep),
+  #                   "long"  (1.0s two-tone 800/1000Hz alert),
+  #                   "siren" (1.5s rising sweep 400-1200Hz)
+  # Custom WAV:       set to an absolute path, e.g. "/data/my_tone.wav"
+  # Per-stage overrides can be set in the messages section below.
+  attention_tone: "none"
+  attention_tone_volume: 1.0  # 0.0-2.0 multiplier (reserved for future use)
+
+# Audio push settings — VoxWatch serves audio files via HTTP for go2rtc to fetch
+audio_push:
+  serve_port: 8891             # Port for the temporary HTTP server
+
+# Pre-cached warning messages
+messages:
+  stage1: "Attention. You are on private property. You are being recorded on camera. The homeowner has been notified."
+  stage2_prefix: "Individual detected."
+  stage2_suffix: "You have been identified and recorded. The homeowner has been notified."
+  stage3_prefix: "Warning."
+  stage3_suffix: "All activity has been recorded and transmitted. Authorities are being contacted."
+  # Per-stage attention tone overrides.
+  # Uncomment and set to override the global audio.attention_tone for a specific stage.
+  # Valid values: "none", "short", "long", "siren", or a path to a custom WAV file.
+  # stage1_tone: "short"    # override for Stage 1 (pre-cached generic warning)
+  # stage2_tone: "long"     # override for Stage 2 (AI personalized description)
+  # stage3_tone: "siren"    # override for Stage 3 (behavioral escalation)
+
+# Property address — injected into radio dispatch messages
+property:
+  street: "Your Street Address"
+  city: "Your City"
+  state: "CA"
+  full_address: "Your Street Address, Your City, CA"
+
+# Radio dispatch effect settings
+# Controls how TTS audio is processed to sound like a police radio transmission.
+# intensity: "low"    — light bandpass and compression, subtle noise
+#            "medium" — standard radio sound (recommended)
+#            "high"   — tight bandpass, aggressive AGC, heavy noise
+radio_effect:
+  enabled: true
+  intensity: "medium"        # low, medium, high
+  bandpass_low: 300          # Hz — high-pass cutoff (removes bass)
+  bandpass_high: 3000        # Hz — low-pass cutoff (removes highs)
+  noise_level: 0.03          # 0.0-1.0 — background static amplitude
+  squelch_enabled: true      # add squelch release sound at end of transmission
+
+# Response Mode — controls the speaking style and authority tone of all deterrent audio.
+#
+# Core Modes (serious, real security use):
+#   police_dispatch      — Female dispatcher voice. Radio effects. 10-codes.
+#   live_operator        — Simulates a real person watching. "I can see you."
+#   private_security     — Professional, firm. "You are on private property."
+#   recorded_evidence    — Cold, system-driven. "Subject recorded. Entry logged."
+#   homeowner            — Personal, calm, direct. "Hey. I can see you."
+#   automated_surveillance — Neutral AI voice. "Movement detected. Behavior flagged."
+#
+# Situational Modes:
+#   guard_dog            — Implies a dog threat. "You don't want to be there."
+#   neighborhood_watch   — Community pressure. "Neighbors have been alerted."
+#
+# Fun / Novelty Modes (theatrical, good for demos):
+#   mafioso, tony_montana, pirate_captain, british_butler, disappointed_parent
+#
+# Set name to "custom" to supply your own prompt modifier via custom_prompt.
+response_mode:
+  name: "private_security"     # Response mode name (see list above)
+  custom_prompt: ""            # Only used when name is "custom"
+  # Dispatch-specific settings — only used when name is "police_dispatch".
+  # All fields are optional. When absent, the dispatch pipeline uses generic
+  # fallback phrasing ("the property", no agency, no callsign).
+  dispatch:
+    address: ""                # Street address, e.g. "123 Main Street"
+    city: ""                   # City name, e.g. "Springfield"
+    state: ""                  # Two-letter state code, e.g. "CA"
+    full_address: ""           # Auto-assembled: "123 Main Street, Springfield, CA"
+    agency: ""                 # Responding agency, e.g. "County Sheriff"
+    callsign: ""               # Unit callsign, e.g. "Unit 7"
+    include_address: true      # false = use "the property" instead of address above
+    intro_audio: ""            # Custom intro audio file path (WAV or MP3).
+                               # When set and the file exists, it is used as the channel
+                               # intro directly — no TTS or chatter generation.
+                               # Example: /config/audio/connecting.wav
+                               # Priority: custom file > cached generated > auto-generate.
+    intro_text: "Connecting to {agency} dispatch frequency."
+                               # Template text for the auto-generated intro voice line.
+                               # Supports {agency} substitution. Only used when intro_audio
+                               # is empty AND no cached intro exists at
+                               # /data/audio/dispatch_intro_cached.wav.
+    channel_intro: true        # Play "live radio channel" intro before the dispatch call.
+                               # Sequence: clean "Connecting to {agency} dispatch..." voice
+                               #   → ~1s radio tuning static
+                               #   → random tail-end of another call (radio-processed)
+                               #   → 0.5s squelch pause → main dispatch call begins.
+                               # Set false to skip the intro and go straight to the beep.
+    # Dispatcher voice / speed — controls the TTS voice and cadence for all
+    # dispatcher segments.  The active field depends on tts.provider:
+    #   kokoro     → dispatcher_voice     (Kokoro voice ID)
+    #   openai     → dispatcher_openai_voice
+    #   elevenlabs → dispatcher_elevenlabs_voice
+    #   piper/espeak → no voice selection (single voice per model)
+    dispatcher_voice: "af_bella"             # Kokoro: warm/professional female.
+                                             # Also: af_sarah (clear), af_nicole (authoritative).
+    dispatcher_openai_voice: "nova"          # OpenAI: clear female (also: shimmer, alloy).
+    dispatcher_elevenlabs_voice: ""          # ElevenLabs voice ID for the dispatcher.
+                                             # Default when blank: EXAVITQu4vr4xnSDxMaL (Bella).
+                                             # Get IDs at elevenlabs.io/voice-library
+    dispatcher_speed: 0.9                    # Slightly slower than normal — real dispatchers
+                                             # speak in a measured, deliberate cadence.
+    # Officer response — male-voice acknowledgment appended after the dispatcher.
+    # The active voice field depends on tts.provider (same as dispatcher above).
+    officer_response: true     # Append officer acknowledgment after dispatch (default true).
+                               # Flow: [dispatcher] → [1.5–2.5s pause] → [beep] [officer]
+    officer_callsign: ""       # Officer unit designation, e.g. "Unit 7".
+                               # Falls back to callsign above when empty.
+    officer_voice: "am_fenrir"               # Kokoro: deep male voice for the officer.
+    officer_openai_voice: "onyx"             # OpenAI: deepest male voice.
+    officer_elevenlabs_voice: ""             # ElevenLabs voice ID for the officer.
+                                             # Default when blank: ErXwobaYiN019PkySvjV (Antoni).
+    officer_speed: 1.0         # Officers speak at normal conversational speed.
+
+# Pipeline escalation — controls the two-stage deterrent timing.
+#
+# Detection fires the pipeline. Initial Response plays immediately. If the
+# person is still present after `escalation.delay` seconds, the Escalation
+# stage fires with AI analysis inserted into the mode's template.
+# Resolution (optional) plays a brief "area clear" when the person leaves.
+pipeline:
+  initial_response:
+    delay: 0                   # Seconds before Initial Response (always 0)
+    enabled: true              # Set false to skip Initial Response entirely
+  escalation:
+    delay: 6                   # Seconds after Initial Response before Escalation
+    condition: "person_still_present"  # Only fire if person still detected
+    enabled: true              # Set false to disable the Escalation stage
+  resolution:
+    enabled: false             # Set true to play a "clear" message when person leaves
+    message: "Area clear."     # Message spoken when person departs
+
+# Logging
+logging:
+  level: "INFO"                # DEBUG, INFO, WARNING, ERROR
+  file: "/data/voxwatch.log"

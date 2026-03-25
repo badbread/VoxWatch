@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ── Python linting and type checking ─────────────────────────────────
+  python-lint:
+    name: Python Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install ruff
+          pip install -r requirements.txt
+
+      - name: Ruff lint
+        run: ruff check voxwatch/ --output-format=github || true
+        # Non-blocking for now — warns but doesn't fail the build.
+        # Remove '|| true' once existing issues are cleaned up.
+
+      - name: Ruff format check
+        run: ruff format --check voxwatch/ || true
+        # Non-blocking for now — same reason as above.
+
+  # ── Python syntax validation ─────────────────────────────────────────
+  python-syntax:
+    name: Python Syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Check all Python files parse
+        run: |
+          find voxwatch/ dashboard/backend/ -name "*.py" | while read f; do
+            python -c "import ast; ast.parse(open('$f').read())" || exit 1
+          done
+
+  # ── Frontend build ───────────────────────────────────────────────────
+  frontend-build:
+    name: Frontend Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard/frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: dashboard/frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript check
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build
+
+  # ── Docker build (validates Dockerfile) ──────────────────────────────
+  docker-build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build VoxWatch image
+        run: docker build -t voxwatch:ci .
+
+      - name: Build Dashboard image
+        run: docker build -t voxwatch-dashboard:ci dashboard/
+
+  # ── Security scan ────────────────────────────────────────────────────
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for hardcoded IPs (10.x.x.x)
+        run: |
+          # Fail if any real internal IPs sneak back into the codebase
+          if grep -rn "10\.\(1\|0\)\.\(1\|2\|4\|10\)\." \
+            --include="*.py" --include="*.ts" --include="*.tsx" \
+            --include="*.yaml" --include="*.yml" --include="*.md" \
+            --exclude-dir=node_modules --exclude-dir=.git; then
+            echo "::error::Found hardcoded internal IP addresses!"
+            exit 1
+          fi
+
+      - name: Check for credential patterns
+        run: |
+          # Fail if obvious passwords appear in source (exclude this CI file)
+          if grep -rn "REDACTED\|REDACTED" \
+            --include="*.py" --include="*.ts" --include="*.tsx" \
+            --include="*.yaml" --include="*.yml" \
+            --exclude-dir=node_modules --exclude-dir=.git \
+            --exclude="ci.yml"; then
+            echo "::error::Found hardcoded credentials!"
+            exit 1
+          fi

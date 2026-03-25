@@ -1,0 +1,15 @@
+aiohttp>=3.9.0
+google-generativeai>=0.8.0
+paho-mqtt>=2.0.0
+pyyaml>=6.0
+astral>=3.2
+Pillow>=10.0.0
+requests>=2.31.0
+reolink-aio>=0.9.0
+
+# TTS providers (optional - only needed if using that provider)
+elevenlabs    # ElevenLabs TTS
+cartesia      # Cartesia Sonic TTS
+boto3         # Amazon Polly TTS
+# openai      # Already listed for AI vision
+# kokoro-onnx # Kokoro local TTS (install separately if using GPU)
