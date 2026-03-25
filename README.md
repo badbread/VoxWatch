@@ -645,17 +645,6 @@ radio_effect:
 
 ---
 
-## Need Help Setting This Up?
-
-If you want VoxWatch running without the hassle, I offer setup services:
-
-- **Remote Setup ($200)** — You already have Frigate running. I connect remotely, install VoxWatch, configure everything, and test audio.
-- **Full System Setup ($600+)** — I set up Frigate + VoxWatch end-to-end on your hardware.
-
-If you're interested, reach out: jason@voxwatch.dev
-
----
-
 ## Built in the Open (AI-Assisted)
 
 VoxWatch was built using a heavily **AI-assisted workflow** (primarily Claude), with a focus on making the codebase:
@@ -716,7 +705,7 @@ Call it out.
 I tend to build fast and refine in public.
 
 If you're curious how I approach stuff like this:
-https://badbread.com
+https://it.badbread.com
 
 ---
 
