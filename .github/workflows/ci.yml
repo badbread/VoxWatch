@@ -96,11 +96,13 @@ jobs:
 
       - name: Check for hardcoded IPs (10.x.x.x)
         run: |
-          # Fail if any real internal IPs sneak back into the codebase
+          # Fail if any real internal IPs sneak back into production code.
+          # Excludes: tests/ (example IPs in docs/help text), ci.yml (this file)
           if grep -rn "10\.\(1\|0\)\.\(1\|2\|4\|10\)\." \
             --include="*.py" --include="*.ts" --include="*.tsx" \
             --include="*.yaml" --include="*.yml" --include="*.md" \
-            --exclude-dir=node_modules --exclude-dir=.git; then
+            --exclude-dir=node_modules --exclude-dir=.git \
+            --exclude-dir=tests; then
             echo "::error::Found hardcoded internal IP addresses!"
             exit 1
           fi
