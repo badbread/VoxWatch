@@ -1,12 +1,15 @@
 /**
- * CameraStatusCard — dashboard camera tile with color-coded metadata.
+ * CameraStatusCard — dashboard camera tile for the monitoring grid.
+ *
+ * Displays: camera name, status badge, schedule, and last detection time.
+ * Clicking navigates to the Cameras page (handled by CameraStatusGrid).
  *
  * Shows a "No speaker" error badge when a camera has been identified as having
  * no audio output, and suppresses the "VoxWatch Enabled" badge in that case
  * since the deterrent cannot function.
  */
 
-import { Camera } from 'lucide-react';
+import { Camera, Clock, Zap } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { Badge } from '@/components/common/Badge';
 import { useConfigQuery } from '@/hooks/useConfig';
@@ -64,7 +67,7 @@ export function CameraStatusCard({ camera }: CameraStatusCardProps) {
           : 'border-gray-100 opacity-60 dark:border-gray-800',
       )}
     >
-      {/* Header */}
+      {/* Header row — camera name + status badge */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
           <Camera className="h-4 w-4 flex-shrink-0 text-gray-400" aria-hidden="true" />
@@ -87,19 +90,28 @@ export function CameraStatusCard({ camera }: CameraStatusCardProps) {
         </div>
       </div>
 
-      {/* Compact one-liner — detailed stats are in the side panel */}
-      {(camera.enabled || camera.fps != null) && !noSpeaker && (
-        <div className="mt-2 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-          {camera.fps != null && (
-            <span className="font-mono font-medium text-emerald-600 dark:text-emerald-400">
-              {camera.fps.toFixed(1)} fps
-            </span>
-          )}
-          {camera.enabled && camera.fps != null && (
-            <span className="text-gray-300 dark:text-gray-600">·</span>
-          )}
-          {camera.enabled && (
+      {/* Enabled camera metadata — schedule and last detection */}
+      {camera.enabled && !noSpeaker && (
+        <div className="mt-2 space-y-1">
+          {/* Active schedule */}
+          <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+            <Clock className="h-3 w-3 text-cyan-500 flex-shrink-0" aria-hidden="true" />
             <span className="font-medium text-cyan-600 dark:text-cyan-400">{scheduleLabel}</span>
+          </div>
+
+          {/* Last detection time */}
+          {camera.last_detection_at ? (
+            <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+              <Zap className="h-3 w-3 text-rose-500 flex-shrink-0" aria-hidden="true" />
+              <span className="text-rose-600 dark:text-rose-400">
+                {new Date(camera.last_detection_at).toLocaleString()}
+              </span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 text-xs text-gray-400 dark:text-gray-500">
+              <Zap className="h-3 w-3 flex-shrink-0" aria-hidden="true" />
+              <span>No detections yet</span>
+            </div>
           )}
         </div>
       )}
@@ -110,6 +122,8 @@ export function CameraStatusCard({ camera }: CameraStatusCardProps) {
           {camera.compatibility_notes ?? 'No audio output — VoxWatch deterrent cannot function.'}
         </p>
       )}
+
+      {/* Hover hint rendered by the parent button wrapper — nothing to add here */}
     </div>
   );
 }

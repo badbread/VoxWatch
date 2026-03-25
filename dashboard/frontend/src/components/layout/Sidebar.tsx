@@ -9,8 +9,9 @@
 import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard,
+  Camera,
   Settings,
-  Volume2,
+  FlaskConical,
   Wand2,
   Sun,
   Moon,
@@ -26,16 +27,28 @@ interface NavItem {
   icon: React.ElementType;
 }
 
+/** Primary navigation items rendered above the separator. */
 const NAV_ITEMS: NavItem[] = [
-  { label: 'Dashboard', to: '/', icon: LayoutDashboard },
+  { label: 'Dashboard',     to: '/',       icon: LayoutDashboard },
+  { label: 'Cameras',       to: '/cameras', icon: Camera },
+  { label: 'Configuration', to: '/config',  icon: Settings },
+  { label: 'Tests',         to: '/tests',   icon: FlaskConical },
+];
+
+/** Secondary items rendered below the separator (utility / setup). */
+const NAV_ITEMS_SECONDARY: NavItem[] = [
   { label: 'Setup Wizard', to: '/wizard', icon: Wand2 },
-  { label: 'Configuration', to: '/config', icon: Settings },
-  { label: 'Audio Test', to: '/audio', icon: Volume2 },
 ];
 
 export interface SidebarProps {
   /** Whether the sidebar is in collapsed (icon-only) mode. */
   collapsed?: boolean;
+  /**
+   * Optional callback fired after a nav link is clicked.
+   * Used by the mobile drawer in AppShell to close the overlay when the user
+   * navigates to a new route.
+   */
+  onNavClick?: (() => void) | undefined;
 }
 
 /**
@@ -43,7 +56,7 @@ export interface SidebarProps {
  *
  * Reads service status to render the bottom health indicator dot.
  */
-export function Sidebar({ collapsed = false }: SidebarProps) {
+export function Sidebar({ collapsed = false, onNavClick }: SidebarProps) {
   const { status, isLoading } = useServiceStatus();
   const { isDark, toggle } = useDarkMode();
 
@@ -95,12 +108,50 @@ export function Sidebar({ collapsed = false }: SidebarProps) {
 
       {/* Navigation links */}
       <nav className="flex-1 overflow-y-auto py-4" aria-label="Main navigation">
+        {/* Primary nav items */}
         <ul className="space-y-0.5 px-2">
           {NAV_ITEMS.map(({ label, to, icon: Icon }) => (
             <li key={to}>
               <NavLink
                 to={to}
                 end={to === '/'}
+                onClick={onNavClick}
+                className={({ isActive }) =>
+                  cn(
+                    'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
+                    'focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
+                    isActive
+                      ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-400'
+                      : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100',
+                    collapsed && 'justify-center px-0',
+                  )
+                }
+                title={collapsed ? label : undefined}
+              >
+                <Icon className="h-4.5 w-4.5 flex-shrink-0" aria-hidden="true" />
+                {!collapsed && <span>{label}</span>}
+              </NavLink>
+            </li>
+          ))}
+        </ul>
+
+        {/* Separator */}
+        <div
+          className={cn(
+            'mx-2 my-3 border-t border-gray-200 dark:border-gray-700/50',
+            collapsed && 'mx-auto w-8',
+          )}
+          role="separator"
+        />
+
+        {/* Secondary nav items (Setup Wizard) */}
+        <ul className="space-y-0.5 px-2">
+          {NAV_ITEMS_SECONDARY.map(({ label, to, icon: Icon }) => (
+            <li key={to}>
+              <NavLink
+                to={to}
+                end={to === '/'}
+                onClick={onNavClick}
                 className={({ isActive }) =>
                   cn(
                     'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',

@@ -15,7 +15,9 @@ The /frigate and /go2rtc endpoints do live HTTP probes on each call. They
 are intended for the system settings page, not for polling.
 """
 
+import json as _json
 import logging
+import random
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -155,7 +157,7 @@ class AiTestRequest(BaseModel):
     """Request body for POST /api/system/test-ai."""
 
     provider: str = Field(description="AI provider to test (gemini, openai, anthropic, grok, ollama)")
-    model: str = Field(description="Model name to test (e.g. gemini-2.0-flash)")
+    model: str = Field(description="Model name to test (e.g. gemini-3.1-flash)")
     api_key: Optional[str] = Field(default=None, description="API key (not needed for ollama)")
     host: Optional[str] = Field(default=None, description="Host URL for self-hosted providers")
 
@@ -583,3 +585,314 @@ async def _test_local_binary(name: str) -> Optional[str]:
     if shutil.which(name):
         return None
     return f"{name} not installed in this container"
+
+
+# ── Service Logs ──────────────────────────────────────────────────────────────
+
+
+class LogEntry(BaseModel):
+    """A single parsed log entry from the VoxWatch service log file."""
+
+    timestamp: Optional[str] = Field(
+        default=None,
+        description="ISO 8601 timestamp parsed from the log line, or null if unparseable.",
+    )
+    level: str = Field(
+        description="Severity level string (ERROR, WARNING, INFO, DEBUG, or UNKNOWN).",
+    )
+    logger: str = Field(
+        description="Logger name, e.g. 'voxwatch.audio' or 'dashboard.router.system'.",
+    )
+    message: str = Field(description="Human-readable message body.")
+    raw: str = Field(description="Original unmodified log line.")
+
+
+class LogsResponse(BaseModel):
+    """Response body for GET /api/system/logs."""
+
+    entries: list[LogEntry] = Field(description="Parsed log entries, oldest first.")
+    lines_read: int = Field(description="Total lines read from the log file before filtering.")
+    log_file: str = Field(description="Absolute path of the log file that was read.")
+    error: Optional[str] = Field(
+        default=None,
+        description="Error message when the file could not be opened, otherwise null.",
+    )
+
+
+# Standard Python logging format pattern used by VoxWatch:
+# 2025-03-24 02:15:33,123 - voxwatch.audio - INFO - Message here
+import re as _re
+
+# Match both VoxWatch log formats:
+# Format 1 (console): 2026-03-24 20:58:37 [voxwatch.service] INFO: Message
+# Format 2 (file):    2026-03-24 20:58:37,123 - voxwatch.service - INFO - Message
+_LOG_LINE_RE = _re.compile(
+    r"^(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:[,\.]\d+)?)"
+    r"\s+(?:"
+    r"\[(?P<logger1>[^\]]+)\]\s+(?P<level1>DEBUG|INFO|WARNING|ERROR|CRITICAL):\s*(?P<message1>.*)"
+    r"|"
+    r"-\s+(?P<logger2>\S+)\s+-\s+(?P<level2>DEBUG|INFO|WARNING|ERROR|CRITICAL)\s+-\s+(?P<message2>.*)"
+    r")$"
+)
+
+_LEVEL_ORDER = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3, "CRITICAL": 4}
+
+
+def _parse_log_line(raw: str) -> LogEntry:
+    """Parse a single raw log line into a LogEntry.
+
+    Attempts to match the standard VoxWatch/Python logging format:
+        YYYY-MM-DD HH:MM:SS,mmm - logger.name - LEVEL - Message
+
+    Lines that do not match (stack traces, continuation lines) are returned
+    with level="UNKNOWN" and the raw text as the message.
+
+    Args:
+        raw: One raw line from the log file (stripped of trailing whitespace).
+
+    Returns:
+        A LogEntry with parsed fields or best-effort UNKNOWN fallback.
+    """
+    m = _LOG_LINE_RE.match(raw)
+    if m:
+        # Normalise the timestamp separator: Python uses comma, ISO uses dot.
+        ts = m.group("ts").replace(",", ".")
+        # Both format branches use numbered suffixes — pick whichever matched.
+        log = m.group("logger1") or m.group("logger2") or ""
+        lvl = m.group("level1") or m.group("level2") or "UNKNOWN"
+        msg = m.group("message1") if m.group("message1") is not None else (m.group("message2") or "")
+        return LogEntry(
+            timestamp=ts,
+            level=lvl,
+            logger=log,
+            message=msg,
+            raw=raw,
+        )
+    return LogEntry(
+        timestamp=None,
+        level="UNKNOWN",
+        logger="",
+        message=raw,
+        raw=raw,
+    )
+
+
+@router.get(
+    "/logs",
+    response_model=LogsResponse,
+    summary="Read recent VoxWatch service logs",
+    description=(
+        "Reads the last N lines from /data/voxwatch.log (the log file written by "
+        "the VoxWatch service process). Parses each line and optionally filters by "
+        "severity level. Returns entries oldest-first. "
+        "The `lines` parameter caps how many raw lines are read from the tail of "
+        "the file before filtering; the returned entry count may be less when a "
+        "level filter is applied."
+    ),
+)
+async def get_logs(
+    lines: int = 50,
+    level: str = "all",
+) -> LogsResponse:
+    """Read recent VoxWatch service logs from the data directory.
+
+    Reads the last ``lines`` lines from /data/voxwatch.log, parses each into
+    structured fields (timestamp, level, logger, message), and filters by
+    ``level`` when it is not "all".
+
+    Args:
+        lines: Number of tail lines to read (clamped to 1–500, default 50).
+        level: Severity level to filter to ("ERROR", "WARNING", "INFO", "DEBUG",
+               or "all" for no filtering). Case-insensitive.
+
+    Returns:
+        LogsResponse with the parsed entries list and file metadata.
+    """
+    lines = max(1, min(lines, 500))
+    log_path = cfg_module.LOG_FILE
+    level_upper = level.upper()
+
+    try:
+        path = Path(log_path)
+        if not path.exists():
+            return LogsResponse(
+                entries=[],
+                lines_read=0,
+                log_file=log_path,
+                error=f"Log file not found: {log_path}",
+            )
+
+        raw_lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        tail = raw_lines[-lines:]
+        lines_read = len(tail)
+
+        entries = [_parse_log_line(ln) for ln in tail if ln.strip()]
+
+        # Apply level filter — keep entries at or above the requested severity.
+        # UNKNOWN lines (stack traces, etc.) are always included so context is
+        # preserved for ERROR and CRITICAL entries.
+        if level_upper != "ALL":
+            min_order = _LEVEL_ORDER.get(level_upper, 0)
+            entries = [
+                e for e in entries
+                if e.level == "UNKNOWN" or _LEVEL_ORDER.get(e.level, 0) >= min_order
+            ]
+
+        return LogsResponse(
+            entries=entries,
+            lines_read=lines_read,
+            log_file=log_path,
+            error=None,
+        )
+
+    except OSError as exc:
+        logger.warning("Could not read log file %s: %s", log_path, exc)
+        return LogsResponse(
+            entries=[],
+            lines_read=0,
+            log_file=log_path,
+            error=str(exc),
+        )
+
+
+# ── MQTT Simulation ──────────────────────────────────────────────────────────
+
+
+class MqttSimRequest(BaseModel):
+    """Request body for POST /api/system/mqtt-simulation."""
+
+    camera: str = Field(
+        default="frontdoor",
+        description="Camera name to simulate detection on.",
+    )
+    scenario: str = Field(
+        default="car_thief_night",
+        description="Test scenario name.",
+    )
+    score: float = Field(
+        default=0.92,
+        description="Detection confidence score (0.0–1.0).",
+        ge=0.0,
+        le=1.0,
+    )
+
+
+class MqttSimResponse(BaseModel):
+    """Response body for POST /api/system/mqtt-simulation."""
+
+    success: bool
+    event_id: str = ""
+    message: str = ""
+
+
+@router.post(
+    "/mqtt-simulation",
+    response_model=MqttSimResponse,
+    summary="Trigger a simulated Frigate detection event",
+    description=(
+        "Publishes a synthetic person detection event to the MQTT broker, "
+        "triggering VoxWatch's full pipeline (AI analysis, TTS, audio push) "
+        "without a real person in front of a camera."
+    ),
+)
+async def run_mqtt_simulation(request: MqttSimRequest) -> MqttSimResponse:
+    """Publish a fake Frigate MQTT event to trigger the VoxWatch pipeline.
+
+    Reads MQTT connection details from config.yaml. Publishes a realistic
+    frigate/events JSON payload with type=new, label=person.
+
+    Args:
+        request: Simulation parameters (camera, scenario, score).
+
+    Returns:
+        MqttSimResponse with success flag and event ID.
+    """
+    try:
+        from backend.services.config_service import config_service
+
+        cfg = await config_service.get_raw_config()
+        frigate_cfg = cfg.get("frigate", {})
+        mqtt_host = frigate_cfg.get("mqtt_host", "localhost")
+        mqtt_port = int(frigate_cfg.get("mqtt_port", 1883))
+        mqtt_user = frigate_cfg.get("mqtt_user", "")
+        mqtt_pass = frigate_cfg.get("mqtt_password", "")
+        mqtt_topic = frigate_cfg.get("mqtt_topic", "frigate/events")
+    except Exception as exc:
+        return MqttSimResponse(
+            success=False,
+            message=f"Could not read MQTT config: {exc}",
+        )
+
+    # Build a realistic Frigate event payload
+    now = time.time()
+    rand_hex = f"{random.randint(0, 0xFFFFFF):06x}"
+    event_id = f"{now:.6f}-{rand_hex}"
+
+    event_data = {
+        "id": event_id,
+        "camera": request.camera,
+        "frame_time": now,
+        "snapshot_time": now,
+        "label": "person",
+        "sub_label": None,
+        "top_score": request.score,
+        "score": request.score,
+        "box": [150, 100, 400, 450],
+        "area": 87500,
+        "ratio": 0.71,
+        "region": [0, 0, 640, 480],
+        "stationary": False,
+        "motionless_count": 0,
+        "position_changes": 2,
+        "current_zones": ["driveway"],
+        "entered_zones": ["driveway"],
+        "has_clip": False,
+        "has_snapshot": True,
+        "end_time": None,
+    }
+
+    payload = _json.dumps({
+        "type": "new",
+        "before": event_data,
+        "after": event_data,
+    })
+
+    # Publish via paho-mqtt (synchronous client, run in thread)
+    try:
+        import paho.mqtt.client as mqtt
+        import asyncio
+
+        def _publish():
+            try:
+                client = mqtt.Client()
+            except TypeError:
+                # paho v2 requires CallbackAPIVersion
+                from paho.mqtt.enums import CallbackAPIVersion
+                client = mqtt.Client(callback_api_version=CallbackAPIVersion.VERSION2)
+
+            if mqtt_user:
+                client.username_pw_set(mqtt_user, mqtt_pass)
+            client.connect(mqtt_host, mqtt_port, 10)
+            result = client.publish(mqtt_topic, payload, qos=1)
+            result.wait_for_publish(timeout=5)
+            client.disconnect()
+            return True
+
+        await asyncio.to_thread(_publish)
+
+        return MqttSimResponse(
+            success=True,
+            event_id=event_id,
+            message=f"Published to {mqtt_topic} — camera={request.camera}, score={request.score}",
+        )
+
+    except ImportError:
+        return MqttSimResponse(
+            success=False,
+            message="paho-mqtt not installed in dashboard container. Add it to requirements.txt.",
+        )
+    except Exception as exc:
+        return MqttSimResponse(
+            success=False,
+            message=f"MQTT publish failed: {exc}",
+        )

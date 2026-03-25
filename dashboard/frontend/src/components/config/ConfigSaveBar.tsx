@@ -129,13 +129,19 @@ export function ConfigSaveBar({
 
   return (
     <>
-      {/* Change review panel — slides up above the save bar */}
+      {/*
+       * Change review panel — slides up above the save bar.
+       *
+       * On mobile the save bar itself is lifted by 56px (bottom-14) to clear the
+       * MobileNav footer, so the review panel must sit above that: bottom-28
+       * (save bar height ~56px + nav height ~56px) on mobile, bottom-14 on md+.
+       */}
       {showChanges && (
         <div
           className={cn(
-            'fixed bottom-14 left-0 right-0 z-30 max-h-[50vh] overflow-y-auto',
+            'fixed bottom-28 left-0 right-0 z-30 max-h-[50vh] overflow-y-auto',
             'border-t border-gray-200 bg-gray-50 shadow-2xl dark:border-gray-700 dark:bg-gray-900',
-            'md:left-16 lg:left-64',
+            'md:bottom-14 md:left-16 lg:left-64',
           )}
         >
           <div className="flex items-center justify-between border-b border-gray-200 px-4 py-2 dark:border-gray-700">
@@ -146,8 +152,10 @@ export function ConfigSaveBar({
               </span>
             </div>
             <button
+              type="button"
               onClick={() => setShowChanges(false)}
-              className="rounded-lg p-1 text-gray-400 hover:bg-gray-200 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+              aria-label="Close changes panel"
+              className="rounded-lg p-2 text-gray-400 hover:bg-gray-200 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
             >
               <X className="h-4 w-4" />
             </button>
@@ -216,17 +224,24 @@ export function ConfigSaveBar({
         </div>
       )}
 
-      {/* Save bar */}
+      {/*
+       * Save bar.
+       *
+       * On mobile it anchors to bottom-14 (56px) so it sits above the fixed
+       * MobileNav footer. On md+ the MobileNav is hidden and the bar returns
+       * to bottom-0. The translate-y-full slide-out still applies on top of
+       * whichever bottom value is active.
+       */}
       <div
         className={cn(
-          'fixed bottom-0 left-0 right-0 z-30 transition-transform duration-200 ease-out',
+          'fixed bottom-14 left-0 right-0 z-30 transition-transform duration-200 ease-out',
           isDirty ? 'translate-y-0' : 'translate-y-full',
-          'md:left-16 lg:left-64',
+          'md:bottom-0 md:left-16 lg:left-64',
         )}
         aria-live="polite"
         aria-label="Configuration save bar"
       >
-        <div className="flex items-center justify-between gap-4 border-t border-gray-200 bg-white px-4 py-3 shadow-lg dark:border-gray-700/50 dark:bg-gray-900 sm:px-6">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 bg-white px-4 py-3 shadow-lg dark:border-gray-700/50 dark:bg-gray-900 sm:flex-nowrap sm:gap-4 sm:px-6">
           {/* Validation status */}
           <div className="flex items-center gap-2">
             {isSaving ? (
@@ -254,13 +269,14 @@ export function ConfigSaveBar({
             </span>
           </div>
 
-          {/* Actions */}
+          {/* Actions — min-h ensures 44px touch targets on all buttons */}
           <div className="flex flex-shrink-0 items-center gap-2">
             {/* Review Changes button */}
             <button
+              type="button"
               onClick={() => setShowChanges(!showChanges)}
               className={cn(
-                'flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors',
+                'flex min-h-[44px] items-center gap-1.5 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors',
                 showChanges
                   ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-950/30 dark:text-blue-300'
                   : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700',
@@ -271,18 +287,20 @@ export function ConfigSaveBar({
             </button>
 
             <button
+              type="button"
               onClick={onDiscard}
               disabled={isSaving}
-              className="flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+              className="flex min-h-[44px] items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
             >
               <RotateCcw className="h-3.5 w-3.5" />
               Discard
             </button>
             <button
+              type="button"
               onClick={onSave}
               disabled={isSaving || hasErrors}
               className={cn(
-                'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-white',
+                'flex min-h-[44px] items-center gap-1.5 rounded-lg px-3 py-2.5 text-sm font-medium text-white',
                 'focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2',
                 'disabled:cursor-not-allowed disabled:opacity-50',
                 hasErrors ? 'bg-gray-400' : 'bg-blue-600 hover:bg-blue-700',

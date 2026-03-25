@@ -30,6 +30,7 @@ import {
 import { cn } from '@/utils/cn';
 import { inputCls, Field } from '@/components/common/FormField';
 import { useServiceStatus } from '@/hooks/useServiceStatus';
+import { CameraReportPrompt } from '@/components/common/CameraReportPrompt';
 import {
   detectCamera,
   testWizardAudio,
@@ -378,6 +379,22 @@ export interface WizardStepTestProps {
   streamName: string;
   codec: string;
   warmupDelay: number;
+  /**
+   * True when the camera model was not found in the VoxWatch database.
+   * When set, a CameraReportPrompt appears after the operator reports
+   * what they heard so the result can be submitted to the community.
+   */
+  isUnknownCamera?: boolean;
+  /** Manufacturer string from ONVIF identify — forwarded to the report prompt. */
+  manufacturer?: string;
+  /** Model string from ONVIF identify — forwarded to the report prompt. */
+  model?: string;
+  /** Firmware version from ONVIF identify — forwarded to the report prompt. */
+  firmware?: string;
+  /** Camera IP from ONVIF identify — forwarded to the report prompt. */
+  ip?: string;
+  /** Backchannel codecs from go2rtc — forwarded to the report prompt. */
+  backchannelCodecs?: string[];
   /** Called when the operator confirms they heard audio clearly. */
   onHeard: (result: WizardTestResponse) => void;
   /** Called when the operator heard nothing. */
@@ -399,11 +416,38 @@ export function WizardStepTest({
   streamName,
   codec,
   warmupDelay,
+  isUnknownCamera = false,
+  manufacturer,
+  model,
+  firmware,
+  ip,
+  backchannelCodecs,
   onHeard,
   onNoAudio,
   onPartial,
 }: WizardStepTestProps) {
   const [phase, setPhase] = useState<TestPhase>('idle');
+  /** Audio result chosen by the operator — drives the report prompt variant. */
+  const [audioResult, setAudioResult] = useState<
+    'success' | 'failed' | 'garbled' | 'partial' | null
+  >(null);
+
+  // Read Frigate/go2rtc versions and the camera entry from the status store.
+  // The camera entry may have speaker_status and camera_model populated if
+  // the user ran Identify Camera before entering the wizard.
+  const { status } = useServiceStatus();
+  const cameraStatus = status?.cameras.find((c) => c.name === cameraName);
+
+  // Resolve whether this camera is unknown — use the prop if explicitly provided,
+  // otherwise fall back to the speaker_status from the status store.
+  const effectivelyUnknown =
+    isUnknownCamera ||
+    cameraStatus?.speaker_status === 'unknown';
+
+  // Prefer prop values; fall back to what the status store has already cached.
+  const effectiveManufacturer = manufacturer ?? cameraStatus?.camera_manufacturer;
+  const effectiveModel = model ?? cameraStatus?.camera_model;
+  const effectiveCodecs = backchannelCodecs ?? cameraStatus?.backchannel_codecs;
 
   const testMutation = useMutation({
     mutationFn: testWizardAudio,
@@ -505,7 +549,10 @@ export function WizardStepTest({
           </p>
 
           <button
-            onClick={() => onHeard(testResult)}
+            onClick={() => {
+              setAudioResult('success');
+              onHeard(testResult);
+            }}
             className={cn(
               'flex w-full items-center gap-3 rounded-xl border-2 border-green-500 bg-green-50 px-4 py-3.5 text-sm font-semibold text-green-700',
               'hover:bg-green-100 active:scale-[0.98] transition-all',
@@ -518,7 +565,10 @@ export function WizardStepTest({
           </button>
 
           <button
-            onClick={() => onPartial(testResult)}
+            onClick={() => {
+              setAudioResult('partial');
+              onPartial(testResult);
+            }}
             className={cn(
               'flex w-full items-center gap-3 rounded-xl border-2 border-yellow-400 bg-yellow-50 px-4 py-3.5 text-sm font-semibold text-yellow-700',
               'hover:bg-yellow-100 active:scale-[0.98] transition-all',
@@ -531,7 +581,10 @@ export function WizardStepTest({
           </button>
 
           <button
-            onClick={() => onNoAudio(testResult)}
+            onClick={() => {
+              setAudioResult('failed');
+              onNoAudio(testResult);
+            }}
             className={cn(
               'flex w-full items-center gap-3 rounded-xl border-2 border-red-400 bg-red-50 px-4 py-3.5 text-sm font-semibold text-red-700',
               'hover:bg-red-100 active:scale-[0.98] transition-all',
@@ -542,6 +595,22 @@ export function WizardStepTest({
             <XCircle className="h-5 w-5 flex-shrink-0" />
             No audio heard
           </button>
+
+          {/* Community report prompt — shown only for cameras not in the database */}
+          {effectivelyUnknown && audioResult && (
+            <CameraReportPrompt
+              cameraName={cameraName}
+              manufacturer={effectiveManufacturer}
+              model={effectiveModel}
+              firmware={firmware}
+              ip={ip}
+              backchannelCodecs={effectiveCodecs}
+              hasBackchannel={true}
+              audioResult={audioResult}
+              frigateVersion={status?.frigate.version}
+              go2rtcVersion={status?.go2rtc.version}
+            />
+          )}
         </div>
       )}
     </div>

@@ -17,7 +17,7 @@ import { ToastContainer } from '@/components/common/ToastContainer';
 import { DashboardPage } from '@/pages/DashboardPage';
 import { ConfigPage } from '@/pages/ConfigPage';
 import { CamerasPage } from '@/pages/CamerasPage';
-import { AudioPage } from '@/pages/AudioPage';
+import { TestsPage } from '@/pages/TestsPage';
 import { WizardPage } from '@/pages/WizardPage';
 import { NotFoundPage } from '@/pages/NotFoundPage';
 
@@ -49,7 +49,7 @@ export default function App() {
             <Route index element={<DashboardPage />} />
             <Route path="/cameras" element={<CamerasPage />} />
             <Route path="/config" element={<ConfigPage />} />
-            <Route path="/audio" element={<AudioPage />} />
+            <Route path="/tests" element={<TestsPage />} />
             <Route path="/wizard" element={<WizardPage />} />
           </Route>
           <Route path="*" element={<NotFoundPage />} />

@@ -1,0 +1,105 @@
+name: Camera Compatibility Report
+description: Report whether a camera model works with VoxWatch audio deterrent
+title: "Camera Report: [MANUFACTURER] [MODEL]"
+labels: ["camera-report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing a camera with VoxWatch! This helps the community know which cameras work.
+
+  - type: input
+    id: manufacturer
+    attributes:
+      label: Manufacturer
+      description: Camera brand (e.g. Reolink, Dahua, Hikvision, Amcrest)
+      placeholder: Reolink
+    validations:
+      required: true
+
+  - type: input
+    id: model
+    attributes:
+      label: Model
+      description: Full model number as shown on the camera or its web interface
+      placeholder: CX410
+    validations:
+      required: true
+
+  - type: input
+    id: firmware
+    attributes:
+      label: Firmware Version
+      description: Found in camera web UI under System/Device Info
+      placeholder: v3.2.0.4741
+
+  - type: dropdown
+    id: speaker_type
+    attributes:
+      label: Speaker Type
+      description: Does the camera have a built-in speaker?
+      options:
+        - Built-in speaker (plays audio from the camera itself)
+        - RCA audio out only (needs external speaker connected)
+        - No speaker or audio output at all
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: audio_works
+    attributes:
+      label: Did VoxWatch audio play through the camera?
+      options:
+        - "Yes — heard audio clearly"
+        - "Yes — but audio was garbled/distorted"
+        - "No — no audio at all"
+        - "Partially — intermittent/unreliable"
+        - "Did not test"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: backchannel_codec
+    attributes:
+      label: Backchannel Codec
+      description: Shown in go2rtc stream info or the VoxWatch camera detail page
+      options:
+        - PCMU/8000 (G.711 mu-law)
+        - PCMA/8000 (G.711 A-law)
+        - Multiple codecs available
+        - No backchannel detected
+        - Not sure
+
+  - type: input
+    id: go2rtc_stream_url
+    attributes:
+      label: go2rtc Stream URL Format
+      description: "Which RTSP URL format did you use? Replace credentials with user:pass"
+      placeholder: "rtsp://user:pass@camera-ip/Preview_01_sub"
+
+  - type: dropdown
+    id: connection_type
+    attributes:
+      label: Connection Type
+      options:
+        - PoE (wired ethernet)
+        - WiFi
+        - USB
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional Notes
+      description: Any quirks, workarounds, or tips for this camera
+      placeholder: |
+        e.g. "Had to use the Dahua RTSP URL format instead of ONVIF"
+        e.g. "Audio only works on main stream, not sub stream"
+        e.g. "Speaker is very quiet, volume at 100"
+
+  - type: textarea
+    id: auto_detected
+    attributes:
+      label: Auto-Detected Info (from VoxWatch dashboard)
+      description: If VoxWatch identified the camera, paste the details here
+      render: yaml

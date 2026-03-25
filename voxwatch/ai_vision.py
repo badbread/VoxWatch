@@ -1195,7 +1195,7 @@ async def _call_gemini_images(
     """
     primary_cfg = config["ai"]["primary"]
     api_key: str = primary_cfg["api_key"]
-    model_name: str = primary_cfg.get("model", "gemini-2.0-flash")
+    model_name: str = primary_cfg.get("model", "gemini-3.1-flash")
     timeout_seconds: int = primary_cfg.get("timeout_seconds", 5)
 
     def _run_gemini_sync() -> str:
@@ -1288,7 +1288,7 @@ async def _call_gemini_video(
     """
     primary_cfg = config["ai"]["primary"]
     api_key: str = primary_cfg["api_key"]
-    model_name: str = primary_cfg.get("model", "gemini-2.0-flash")
+    model_name: str = primary_cfg.get("model", "gemini-3.1-flash")
     # Video analysis takes longer than image analysis — use a more generous timeout.
     timeout_seconds: int = primary_cfg.get("timeout_seconds", 5) * 3
 

@@ -101,7 +101,7 @@ export interface ConditionsConfig {
 export interface AiProviderConfig {
   /** Provider identifier string (e.g. "gemini", "openai", "ollama", "custom"). */
   provider: string;
-  /** Model name or tag (e.g. "gemini-2.0-flash", "llava:7b"). */
+  /** Model name or tag (e.g. "gemini-3.1-flash", "llava:7b"). */
   model: string;
   /** API key for cloud providers. Use ${ENV_VAR} syntax to avoid committing secrets. */
   api_key?: string;
