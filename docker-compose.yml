@@ -1,10 +1,13 @@
-# VoxWatch Docker Compose — Portainer Stack Deployment
+# VoxWatch Docker Compose
 #
-# DEPLOYMENT: This file is the TEMPLATE that goes in the public repo.
-# For actual deployment, copy to your-nas and fill in the environment variables.
-# See docs/DEPLOYMENT.md for step-by-step Portainer instructions.
+# Quick Start:
+#   1. Set FRIGATE_HOST to your Frigate server IP below
+#   2. docker compose up -d
+#   3. Open http://your-host:33344 — the setup wizard will guide you
 #
-# ALL environment variables MUST be inline (Portainer doesn't handle env_file).
+# The dashboard (voxwatch-dashboard) is OPTIONAL after initial setup.
+# VoxWatch runs independently using config.yaml. Stop the dashboard
+# container to save resources — your deterrent system keeps working.
 
 # version key removed — deprecated in modern Docker Compose
 

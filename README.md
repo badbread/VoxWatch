@@ -504,21 +504,22 @@ docker-compose up -d
 ```
 
 Two containers start:
-- `voxwatch` — core service (Python)
-- `voxwatch-dashboard` — web UI (React + FastAPI)
+- `voxwatch` — core deterrent service (listens for detections, generates audio, pushes to cameras)
+- `voxwatch-dashboard` — web UI for setup and management (optional after initial config)
 
-### 5. Access Dashboard
+### 5. Open the Dashboard
 
 Navigate to `http://your-host:33344`
 
-### 6. Run Camera Setup Wizard
+If this is a fresh install (no config.yaml), you'll be automatically redirected to the **Setup Wizard** which walks you through:
+1. Connect to Frigate (auto-discovers cameras and MQTT)
+2. Choose AI provider and enter API key
+3. Choose TTS voice engine
+4. Pick your response mode (Live Operator, Police Dispatch, etc.)
+5. Select cameras with speakers and test audio
+6. Review and generate config — VoxWatch starts automatically
 
-Click **"Camera Setup Wizard"** and follow 5 steps:
-1. Select your camera from go2rtc
-2. Test backchannel connection
-3. Identify codec (PCMU or PCMA)
-4. Generate and test a tone
-5. Save configuration
+> **Note:** The dashboard is optional after initial setup. VoxWatch runs independently using config.yaml. You can stop the dashboard container to save resources — your deterrent system keeps working. Edit config.yaml manually via SSH if needed — changes are hot-reloaded within 10 seconds.
 
 ---
 
