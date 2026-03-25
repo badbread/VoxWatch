@@ -1,31 +1,31 @@
-# VoxWatch Docker Compose
+# VoxWatch — AI-Powered Security Audio Deterrent
 #
 # Quick Start:
-#   1. Change YOUR_FRIGATE_IP below to your Frigate server's IP address
-#   2. docker compose up -d
-#   3. Open http://your-host:33344 — the setup wizard will guide you through everything
+#   1. docker compose up -d
+#   2. Open http://your-host:33344
+#   3. The setup wizard handles everything else
 #
-# That's it. The setup wizard handles Frigate discovery, MQTT, AI providers,
-# TTS voice selection, response mode, and camera configuration.
+# No configuration needed before first run. The web wizard discovers
+# Frigate, MQTT, cameras, and walks you through AI/TTS/mode selection.
 #
-# The dashboard (voxwatch-dashboard) is OPTIONAL after initial setup.
-# VoxWatch runs independently using config.yaml. Stop the dashboard
-# to save resources — your deterrent system keeps working.
+# The dashboard is OPTIONAL after initial setup. VoxWatch runs
+# independently using config.yaml. Stop the dashboard to save
+# resources — your deterrent system keeps working.
 
 services:
-  # ── Core Service ────────────────────────────────────────────────────────
-  # Listens for Frigate person detections via MQTT, runs AI analysis,
-  # generates TTS audio, and pushes to camera speakers via go2rtc.
+  # ── Core Deterrent Service ──────────────────────────────────────────────
+  # Listens for Frigate person detections, runs AI analysis,
+  # generates TTS audio, pushes to camera speakers.
   voxwatch:
     container_name: voxwatch
     image: voxwatch:latest
+    # build: .                    # Uncomment to build locally instead of pulling
     restart: unless-stopped
     network_mode: host
     environment:
-      - "FRIGATE_HOST=YOUR_FRIGATE_IP"
-      - "TZ=America/Los_Angeles"    # Change to your timezone
+      - "TZ=America/Los_Angeles"  # Change to your timezone
       - "PYTHONUNBUFFERED=1"
-      # Optional: set API keys here instead of in the dashboard
+      # API keys can be set here OR entered in the dashboard (recommended):
       # - "GEMINI_API_KEY=your-key"
       # - "OPENAI_API_KEY=your-key"
       # - "ELEVENLABS_API_KEY=your-key"
@@ -40,21 +40,20 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # ── Dashboard (optional after setup) ────────────────────────────────────
-  # Web UI for configuration, monitoring, and testing.
-  # First run: auto-redirects to setup wizard.
-  # After setup: provides config editor, camera management, audio tests.
-  # Safe to stop after configuration is complete.
+  # ── Web Dashboard (optional after setup) ────────────────────────────────
+  # First run: setup wizard auto-discovers Frigate and guides configuration.
+  # After setup: config editor, camera management, audio testing, logs.
+  # Safe to stop once you're happy with your configuration.
   voxwatch-dashboard:
     container_name: voxwatch-dashboard
     image: voxwatch-dashboard:latest
+    # build: dashboard/           # Uncomment to build locally instead of pulling
     restart: unless-stopped
     network_mode: host
     environment:
-      - "FRIGATE_HOST=YOUR_FRIGATE_IP"    # Same IP as above
       - "DASHBOARD_PORT=33344"
       - "TZ=America/Los_Angeles"
-      # Optional: protect the dashboard with an API key
+      # Protect the dashboard with a token (recommended for remote access):
       # - "DASHBOARD_API_KEY=your-secret-token"
     volumes:
       - ./config:/config
