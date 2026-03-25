@@ -62,6 +62,12 @@ from voxwatch.ai_vision import (
     check_person_still_present,
     close_session as close_ai_session,
 )
+from voxwatch.modes import (
+    get_active_mode as get_active_mode_obj,
+    get_mode_template,
+    build_ai_vars,
+    extract_ai_vars_from_dispatch_json,
+)
 from voxwatch.radio_dispatch import (
     DISPATCH_PERSONAS,   # backward-compat alias for DISPATCH_MODES
     DISPATCH_MODES,
@@ -95,6 +101,43 @@ STATUS_WRITE_INTERVAL = 5
 
 # Service version — keep in sync with pyproject.toml / __version__.
 SERVICE_VERSION = "0.2.0"
+
+
+def _try_parse_phrase_list(ai_description: Optional[str]) -> list[str]:
+    """Attempt to parse an AI description string as a JSON array of phrases.
+
+    Used by ``_run_escalation`` and ``_handle_detection`` to detect when the AI
+    returned a structured list of short phrases (intended for the natural cadence
+    system) rather than a plain sentence.
+
+    Delegates to ``voxwatch.speech.natural_cadence.parse_ai_response`` but is
+    intentionally non-fatal: any import error or parse failure returns an empty
+    list so the caller can fall back to flat-string TTS without crashing.
+
+    A result of ``[single_item]`` where the single item equals the original
+    input string is treated as a failed parse (i.e., the AI did not return a
+    multi-phrase array) and an empty list is returned instead.
+
+    Args:
+        ai_description: Raw AI output string, or None.
+
+    Returns:
+        A list of phrase strings if the input looks like a JSON array with
+        more than one element, otherwise an empty list.
+    """
+    if not ai_description:
+        return []
+    try:
+        from voxwatch.speech.natural_cadence import parse_ai_response
+        phrases = parse_ai_response(ai_description)
+        # Only use the cadence path when the AI actually returned multiple
+        # phrases.  A single-phrase result means the AI responded as plain text
+        # and the standard generate_and_push path handles it correctly.
+        if len(phrases) > 1:
+            return phrases
+        return []
+    except Exception:
+        return []
 
 
 class VoxWatchService:
@@ -657,8 +700,16 @@ class VoxWatchService:
         escalation_delay: float = float(escalation_cfg.get("delay", 6))
 
         # Resolve the active response mode once so we don't re-read config
-        # in every helper call.
+        # in every helper call.  Use the new mode loader which respects
+        # per-camera overrides; keep the legacy mode_name string for the
+        # parts of the pipeline that have not been migrated yet.
         mode_name, _ = _get_active_mode(self.config)
+        # Per-camera override: if this camera has a mode override configured
+        # under response_modes.camera_overrides, the mode object reflects it.
+        _active_mode_obj = get_active_mode_obj(self.config, camera_name)
+        # Re-resolve mode_name from the mode object so it agrees with the
+        # per-camera override (e.g. camera_overrides.backyard_cam = homeowner).
+        mode_name = _active_mode_obj.id
 
         logger.info(
             "Pipeline start: event=%s camera=%s mode=%s",
@@ -800,13 +851,26 @@ class VoxWatchService:
             # For dispatch modes: build an address/agency-aware canned message
             # rather than the plain static default.  The full segmented radio
             # treatment (with AI-driven suspect description) fires in Escalation.
-            initial_text = get_dispatch_initial_message(self._config)
+            initial_text = get_dispatch_initial_message(self.config)
         else:
-            mode_defaults = DEFAULT_MESSAGES.get(mode_name, DEFAULT_MESSAGES["standard"])
-            initial_text = mode_defaults.get(
-                "initial",
-                DEFAULT_MESSAGES["standard"]["initial"],
-            )
+            # Try the new mode system first: get the stage1 template.
+            # The camera_name is embedded in mode_name already (resolved above),
+            # so look up the mode object and pull its stage1 template.
+            try:
+                mode_obj = get_active_mode_obj(self.config)
+                if mode_obj.id == mode_name:
+                    # Build minimal ai_vars — no AI result available yet at stage1.
+                    _vars = build_ai_vars(self.config, camera_name="")
+                    initial_text = get_mode_template(mode_obj, "stage1", _vars, index=0)
+                else:
+                    raise LookupError("mode_name mismatch")
+            except Exception:
+                # Graceful fallback to the old DEFAULT_MESSAGES dict.
+                mode_defaults = DEFAULT_MESSAGES.get(mode_name, DEFAULT_MESSAGES["standard"])
+                initial_text = mode_defaults.get(
+                    "initial",
+                    DEFAULT_MESSAGES["standard"]["initial"],
+                )
 
         logger.info(
             "Initial Response [%s]: '%s'", mode_name, initial_text
@@ -894,27 +958,95 @@ class VoxWatchService:
             )
             return ai_description, push_ok
 
-        # Standard mode: insert AI description into the mode's escalation template.
-        mode_defaults = DEFAULT_MESSAGES.get(mode_name, DEFAULT_MESSAGES["standard"])
-        escalation_template: str = mode_defaults.get(
-            "escalation",
-            DEFAULT_MESSAGES["standard"]["escalation"],
-        )
-
+        # Standard/non-dispatch mode: use AI description directly if present,
+        # otherwise render the mode's stage3 fallback template with AI vars.
         if ai_description:
-            # Insert the AI description between the mode template and the
-            # escalation suffix, separated cleanly.
-            escalation_message = f"{escalation_template} {ai_description}"
+            # AI returned something — use it directly (may be a plain sentence
+            # or a JSON phrase array from the natural cadence system).
+            escalation_message = ai_description
         else:
+            # AI failed — build variable-substituted fallback from mode template.
             logger.warning(
-                "Escalation [%s]: no AI description — using mode default.", mode_name
+                "Escalation [%s]: no AI description — using mode fallback template.",
+                mode_name,
             )
-            escalation_message = escalation_template
+            try:
+                mode_obj = get_active_mode_obj(self.config, camera_name)
+                ai_vars = build_ai_vars(self.config, camera_name=camera_name)
+                escalation_message = get_mode_template(mode_obj, "stage3", ai_vars)
+            except Exception:
+                # Ultimate fallback to old DEFAULT_MESSAGES.
+                mode_defaults = DEFAULT_MESSAGES.get(mode_name, DEFAULT_MESSAGES["standard"])
+                escalation_message = mode_defaults.get(
+                    "escalation",
+                    DEFAULT_MESSAGES["standard"]["escalation"],
+                )
 
         logger.info(
             "Escalation [%s]: playing on %s — '%s...'",
             mode_name, camera_stream, escalation_message[:80],
         )
+
+        # ── Natural cadence path ───────────────────────────────────────────
+        # When the AI returned a JSON array of short phrases AND natural cadence
+        # is enabled, use generate_natural_tts for a more human-sounding result.
+        # The template phrase(s) are prepended so the mode's framing is always
+        # present regardless of what the AI returned.
+        cadence_enabled: bool = (
+            self.config.get("speech", {})
+            .get("natural_cadence", {})
+            .get("enabled", True)
+        )
+        ai_phrases = _try_parse_phrase_list(ai_description)
+
+        if cadence_enabled and ai_phrases:
+            # Build the full phrase list: template phrase + AI phrases.
+            # The escalation_template may itself be a single short sentence, so
+            # we prepend it as the first element.
+            full_phrases = [escalation_template] + ai_phrases
+            import os as _os
+            cadence_path = _os.path.join(
+                self._audio._serve_dir, "escalation_cadence_tts.wav"
+            )
+            converted_path = _os.path.join(
+                self._audio._serve_dir, "escalation_cadence_ready.wav"
+            )
+            try:
+                cadence_ok = await self._audio.generate_natural_tts(
+                    full_phrases, cadence_path
+                )
+                if cadence_ok:
+                    conv_ok = await self._audio.convert_audio(cadence_path, converted_path)
+                    if conv_ok:
+                        tone_name = self._audio._get_stage_tone("stage3_tone")
+                        audio_to_push = await self._audio.prepend_tone(
+                            converted_path, tone_name
+                        )
+                        push_ok = await self._audio.push_audio(camera_stream, audio_to_push)
+                        # Cleanup temp files.
+                        for _p in [cadence_path, converted_path]:
+                            try:
+                                _os.remove(_p)
+                            except OSError:
+                                pass
+                        if audio_to_push not in (cadence_path, converted_path):
+                            try:
+                                _os.remove(audio_to_push)
+                            except OSError:
+                                pass
+                        return ai_description, push_ok
+                logger.warning(
+                    "Escalation [%s]: natural cadence failed — falling back to flat TTS",
+                    mode_name,
+                )
+            except Exception as cadence_exc:
+                logger.warning(
+                    "Escalation [%s]: natural cadence raised %s — falling back to flat TTS",
+                    mode_name,
+                    cadence_exc,
+                )
+
+        # Flat-string fallback (natural cadence disabled, no phrases, or error).
         push_ok = await self._audio.generate_and_push(
             camera_stream, escalation_message, "stage3"
         )
@@ -946,7 +1078,7 @@ class VoxWatchService:
         stage3_cfg = self.config.get("stage3", {})
         clip_seconds = stage3_cfg.get("video_clip_seconds", 5)
 
-        s3_prompt = get_stage3_prompt(self.config)
+        s3_prompt = get_stage3_prompt(self.config, camera_name=camera_name)
         scene_ctx = self._get_scene_context(camera_name)
         if scene_ctx:
             s3_prompt = f"Scene context: {scene_ctx}\n\n{s3_prompt}"
@@ -1137,9 +1269,10 @@ class VoxWatchService:
                 return None
 
             # Build the prompt.  get_stage2_prompt() reads the active response
-            # mode from config (``response_mode.name``) and applies the
-            # appropriate modifier before returning the base prompt.
-            prompt = get_stage2_prompt(self.config)
+            # mode from config and applies the appropriate modifier.  Passing
+            # camera_name enables per-camera override resolution so cameras
+            # configured with different modes get the right prompt.
+            prompt = get_stage2_prompt(self.config, camera_name=camera_name)
             scene_ctx = self._get_scene_context(camera_name)
             if scene_ctx:
                 prompt = f"Scene context: {scene_ctx}\n\n{prompt}"

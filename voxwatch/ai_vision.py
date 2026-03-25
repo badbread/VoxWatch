@@ -565,47 +565,49 @@ def _get_active_mode(config: dict) -> tuple[str, dict]:
     return mode_name, mode_cfg
 
 
-def get_stage2_prompt(config: dict) -> str:
-    """Build the Initial Response / Stage 2 prompt with the active mode modifier.
+def get_stage2_prompt(config: dict, camera_name: Optional[str] = None) -> str:
+    """Build the Stage 2 AI prompt using the active mode's prompt_modifier.
 
-    Reads ``response_mode.name`` from the config dict (falls back to
-    ``persona.name`` for backward compatibility).  Dispatch-style modes
-    (those listed in ``radio_dispatch.DISPATCH_PERSONAS``) receive a
-    structured-JSON prompt (:data:`DISPATCH_STAGE2_PROMPT`) instead of the
-    standard free-text base + modifier approach.  The radio_dispatch module
-    parses the JSON output into realistic scanner segments.
+    Delegates to the :mod:`voxwatch.modes` loader, which resolves the active
+    mode (including per-camera overrides) and returns the stage's
+    ``prompt_modifier``.  Dispatch-style modes
+    (``behavior.is_dispatch = True``) return the structured-JSON dispatch
+    prompt (:data:`DISPATCH_STAGE2_PROMPT`) so the radio_dispatch module can
+    parse the AI output into scanner segments.
 
-    For non-dispatch modes: if the name is ``"custom"`` the
-    ``response_mode.custom_prompt`` string is used as the modifier; for any
-    other name the matching entry from :data:`RESPONSE_MODES` is used.  If
-    the name is not found in ``RESPONSE_MODES`` the function falls back to
-    the standard (unmodified) base prompt so a mis-typed mode name degrades
-    gracefully.
+    Falls back to the legacy ``RESPONSE_MODES``/``DISPATCH_STAGE2_PROMPT``
+    behaviour when the mode loader cannot be imported (should never happen in
+    production; guard is for test isolation only).
 
     Args:
         config: The full VoxWatch config dict as loaded by ``load_config()``.
+        camera_name: Optional Frigate camera name for per-camera override
+            resolution.  When provided, ``response_modes.camera_overrides``
+            is checked before the global ``active_mode``.
 
     Returns:
-        A prompt string ready to pass to ``analyze_snapshots()``.  For dispatch
-        modes this is :data:`DISPATCH_STAGE2_PROMPT`.  For other modes, when
-        the active mode has a non-empty modifier the format is::
-
-            <mode modifier>
-
-            <base Stage 2 prompt>
-
-        When the mode is ``"standard"`` (or the modifier resolves to an empty
-        string) only the bare base prompt is returned so there is no spurious
-        leading whitespace in the LLM context.
+        A prompt string ready to pass to ``analyze_snapshots()``.  For
+        dispatch modes this is :data:`DISPATCH_STAGE2_PROMPT`.  For other
+        modes the mode's ``prompt_modifier`` is returned (may be an empty
+        string for the ``standard`` fallback mode).
     """
-    # Import here to avoid a circular import — radio_dispatch imports nothing
-    # from ai_vision, but keeping the import local is the safest pattern.
+    try:
+        from voxwatch.modes.loader import get_active_mode  # noqa: PLC0415
+        mode_def = get_active_mode(config, camera_name)
+        if mode_def.behavior.is_dispatch:
+            return DISPATCH_STAGE2_PROMPT
+        stage_cfg = mode_def.get_stage("stage2")
+        return stage_cfg.prompt_modifier
+    except Exception as exc:  # pragma: no cover
+        logger.warning(
+            "get_stage2_prompt: mode loader error (%s) — using legacy path.", exc
+        )
+
+    # ── Legacy fallback (pre-modes system) ────────────────────────────────
     from voxwatch.radio_dispatch import DISPATCH_PERSONAS  # noqa: PLC0415
 
     mode_name, mode_cfg = _get_active_mode(config)
 
-    # Dispatch modes get a structured-JSON prompt — the standard
-    # free-text modifier approach does not apply to them.
     if mode_name in DISPATCH_PERSONAS:
         return DISPATCH_STAGE2_PROMPT
 
@@ -644,32 +646,39 @@ def get_stage2_prompt(config: dict) -> str:
     return base
 
 
-def get_stage3_prompt(config: dict) -> str:
-    """Build the Escalation / Stage 3 prompt with the active mode modifier.
+def get_stage3_prompt(config: dict, camera_name: Optional[str] = None) -> str:
+    """Build the Stage 3 (Escalation) AI prompt using the active mode's modifier.
 
-    Identical logic to :func:`get_stage2_prompt` but returns the Stage 3 base
-    prompt (behavioural description of what the person is *doing*) instead of
-    the Stage 2 appearance-description base.
+    Identical logic to :func:`get_stage2_prompt` but returns the mode's
+    Stage 3 ``prompt_modifier`` (behavioural analysis of what the person is
+    *doing*) instead of the Stage 2 appearance description.
 
-    Dispatch-style modes (those listed in ``radio_dispatch.DISPATCH_PERSONAS``)
-    receive :data:`DISPATCH_STAGE3_PROMPT` — a structured-JSON prompt asking for
-    behavior and movement fields — instead of the free-text modifier approach.
+    Dispatch-style modes return :data:`DISPATCH_STAGE3_PROMPT` so the
+    radio_dispatch module can parse the structured JSON output.
 
     Args:
         config: The full VoxWatch config dict as loaded by ``load_config()``.
+        camera_name: Optional Frigate camera name for per-camera override
+            resolution.
 
     Returns:
         A prompt string ready to pass to ``analyze_video()`` or
-        ``analyze_snapshots()``.  For dispatch personas this is
-        :data:`DISPATCH_STAGE3_PROMPT`.  For other personas, when the active
-        persona has a non-empty modifier the format is::
-
-            <persona modifier>
-
-            <base Stage 3 prompt>
-
-        When the mode is ``"standard"`` only the bare base prompt is returned.
+        ``analyze_snapshots()``.  For dispatch modes this is
+        :data:`DISPATCH_STAGE3_PROMPT`.
     """
+    try:
+        from voxwatch.modes.loader import get_active_mode  # noqa: PLC0415
+        mode_def = get_active_mode(config, camera_name)
+        if mode_def.behavior.is_dispatch:
+            return DISPATCH_STAGE3_PROMPT
+        stage_cfg = mode_def.get_stage("stage3")
+        return stage_cfg.prompt_modifier
+    except Exception as exc:  # pragma: no cover
+        logger.warning(
+            "get_stage3_prompt: mode loader error (%s) — using legacy path.", exc
+        )
+
+    # ── Legacy fallback (pre-modes system) ────────────────────────────────
     from voxwatch.radio_dispatch import DISPATCH_PERSONAS  # noqa: PLC0415
 
     mode_name, mode_cfg = _get_active_mode(config)
