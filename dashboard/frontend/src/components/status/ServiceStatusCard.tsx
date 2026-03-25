@@ -1,23 +1,60 @@
 /**
- * ServiceStatusCard — displays Frigate and go2rtc reachability with
- * color-coded version numbers and stats.
+ * ServiceStatusCard — full-width System Hero card for the Dashboard.
+ *
+ * Replaces the old list-based status card with a cinematic hero layout:
+ *   LEFT — pulsing status dot, large "System Active/Degraded" headline,
+ *           camera count subtext, and a stat row (Cameras · Audio · AI).
+ *   RIGHT — most-recent detection event with relative timestamp and camera name.
+ *
+ * Data sources (no new API calls):
+ *  - `useServiceStatus()` for Frigate/go2rtc reachability and camera list.
+ *  - `useConfigQuery()` for AI provider model name displayed in the stat row.
+ *
+ * Color semantics: green = all services active, amber = partial degradation,
+ * red = critical service(s) unreachable.
  */
 
-import { Server, Video, DollarSign } from 'lucide-react';
-import { Card } from '@/components/common/Card';
-import { Badge } from '@/components/common/Badge';
+import type { CSSProperties, ReactNode } from 'react';
+import { Video, Server, Brain, Clock, Mic2, Theater } from 'lucide-react';
+import { cn } from '@/utils/cn';
 import { CardSkeleton } from '@/components/common/LoadingSpinner';
 import { useServiceStatus } from '@/hooks/useServiceStatus';
 import { useConfigQuery } from '@/hooks/useConfig';
-import { COST_MAP } from '@/constants/aiCosts';
-import type { BadgeVariant } from '@/components/common/Badge';
+import type { CameraStatus } from '@/types/status';
 
-function reachableVariant(reachable: boolean): BadgeVariant {
-  return reachable ? 'connected' : 'error';
+/**
+ * Converts an ISO timestamp into a short relative-time string ("12s ago", "4m ago").
+ * Returns null when the input is absent or unparseable.
+ */
+function relativeTime(iso: string | undefined): string | null {
+  if (!iso) return null;
+  const delta = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (delta < 0) return 'just now';
+  if (delta < 60) return `${delta}s ago`;
+  if (delta < 3600) return `${Math.floor(delta / 60)}m ago`;
+  if (delta < 86400) return `${Math.floor(delta / 3600)}h ago`;
+  return `${Math.floor(delta / 86400)}d ago`;
 }
 
 /**
- * Status card showing Frigate and go2rtc health with colorful metadata.
+ * Returns the camera with the most recent last_detection_at timestamp, or null
+ * when no cameras have ever fired.
+ */
+function mostRecentCamera(cameras: CameraStatus[]): CameraStatus | null {
+  return cameras
+    .filter((c) => !!c.last_detection_at)
+    .sort(
+      (a, b) =>
+        new Date(b.last_detection_at!).getTime() -
+        new Date(a.last_detection_at!).getTime(),
+    )[0] ?? null;
+}
+
+/**
+ * Full-width hero card displayed at the top of the Dashboard.
+ *
+ * Shows overall system health at a glance, optimised for a dark monitoring
+ * environment where status must be readable without cognitive load.
  */
 export function ServiceStatusCard() {
   const { status, isLoading } = useServiceStatus();
@@ -27,93 +64,184 @@ export function ServiceStatusCard() {
     return <CardSkeleton />;
   }
 
-  const { frigate, go2rtc } = status;
+  const { frigate, go2rtc, cameras } = status;
 
-  // Cost estimate from config
-  const aiKey = config?.ai?.primary
-    ? `${config.ai.primary.provider}:${config.ai.primary.model}`
-    : null;
-  const costPerDetection = aiKey ? (COST_MAP[aiKey] ?? null) : null;
-  const monthlyCost = costPerDetection != null ? costPerDetection * 30 * 30 : null;
+  const allOk = frigate.reachable && go2rtc.reachable;
+  const partialOk = frigate.reachable || go2rtc.reachable;
+
+  // Headline state
+  const headline = allOk ? 'System Active' : partialOk ? 'Partially Degraded' : 'Services Offline';
+  const dotColor = allOk ? 'bg-green-500' : partialOk ? 'bg-amber-500' : 'bg-red-500';
+  const pingColor = allOk ? 'bg-green-400' : partialOk ? 'bg-amber-400' : 'bg-red-400';
+  const headlineColor = allOk
+    ? 'text-green-400'
+    : partialOk
+      ? 'text-amber-400'
+      : 'text-red-400';
+  const glowStyle: CSSProperties = allOk
+    ? { boxShadow: '0 0 32px rgba(34,197,94,0.08), 0 0 0 1px rgba(34,197,94,0.12)' }
+    : partialOk
+      ? { boxShadow: '0 0 32px rgba(245,158,11,0.08), 0 0 0 1px rgba(245,158,11,0.12)' }
+      : { boxShadow: '0 0 32px rgba(239,68,68,0.08), 0 0 0 1px rgba(239,68,68,0.12)' };
+
+  // Stats
+  const enabledCameras = cameras.filter((c) => c.enabled).length;
+  const totalCameras = cameras.length;
+  const audioReady = go2rtc.reachable;
+  const aiModel = config?.ai?.primary?.model ?? null;
+  const aiConnected = frigate.reachable; // proxy for AI availability
+  const ttsEngine = config?.tts?.engine ?? 'piper';
+  const modeName = config?.response_mode?.name ?? config?.persona?.name ?? 'standard';
+
+  // Last event
+  const lastCamera = mostRecentCamera(cameras);
+  const lastRel = relativeTime(lastCamera?.last_detection_at);
 
   return (
-    <Card title="System Status" subtitle="External service connectivity">
-      <ul className="space-y-2">
-        {/* Frigate */}
-        <li className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2.5 dark:bg-gray-800/50">
-          <div className="flex items-center gap-2.5">
-            <Video className="h-4 w-4 flex-shrink-0 text-blue-400" aria-hidden="true" />
-            <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">
-              Frigate NVR
-            </span>
-            {frigate.version && (
-              <span className="rounded bg-blue-100 px-1.5 py-0.5 font-mono text-xs font-medium text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
-                v{frigate.version}
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-3">
-            {frigate.reachable && frigate.camera_count != null && (
-              <span className="text-xs font-medium text-cyan-600 dark:text-cyan-400">
-                {frigate.camera_count} camera{frigate.camera_count !== 1 ? 's' : ''}
-              </span>
-            )}
-            <Badge
-              variant={reachableVariant(frigate.reachable)}
-              label={frigate.reachable ? 'Reachable' : (frigate.error ?? 'Unreachable')}
-              size="xs"
-              dot
-            />
-          </div>
-        </li>
+    <div
+      className={cn(
+        'rounded-2xl bg-gradient-to-r from-blue-50 via-white to-blue-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900',
+        'border border-gray-200 dark:border-gray-700/40 px-6 py-5 transition-all duration-200',
+      )}
+      style={glowStyle}
+      aria-label="System status hero"
+    >
+      <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
 
-        {/* go2rtc */}
-        <li className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2.5 dark:bg-gray-800/50">
-          <div className="flex items-center gap-2.5">
-            <Server className="h-4 w-4 flex-shrink-0 text-purple-400" aria-hidden="true" />
-            <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">
-              go2rtc
-            </span>
-            {go2rtc.version && go2rtc.version !== 'unknown' && (
-              <span className="rounded bg-purple-100 px-1.5 py-0.5 font-mono text-xs font-medium text-purple-700 dark:bg-purple-900/40 dark:text-purple-300">
-                v{go2rtc.version}
-              </span>
-            )}
-          </div>
+        {/* ── LEFT: headline + stats ────────────────────────────────────── */}
+        <div className="space-y-3">
+          {/* Status dot + headline */}
           <div className="flex items-center gap-3">
-            {go2rtc.reachable && go2rtc.stream_count != null && (
-              <span className="text-xs font-medium text-amber-600 dark:text-amber-400">
-                {go2rtc.stream_count} stream{go2rtc.stream_count !== 1 ? 's' : ''}
+            <span className="relative flex h-3.5 w-3.5 flex-shrink-0">
+              <span
+                className={cn(
+                  'absolute inline-flex h-full w-full animate-ping rounded-full opacity-60',
+                  pingColor,
+                )}
+              />
+              <span
+                className={cn(
+                  'relative inline-flex h-3.5 w-3.5 rounded-full',
+                  dotColor,
+                )}
+              />
+            </span>
+            <h1 className={cn('text-xl font-bold tracking-tight', headlineColor)}>
+              {headline}
+            </h1>
+          </div>
+
+          {/* Subtext */}
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            Monitoring{' '}
+            <span className="font-semibold text-gray-900 dark:text-gray-200">{totalCameras}</span>{' '}
+            camera{totalCameras !== 1 ? 's' : ''}
+            {totalCameras > 0 && enabledCameras < totalCameras && (
+              <span className="ml-1 text-amber-400">
+                ({enabledCameras} enabled)
               </span>
             )}
-            <Badge
-              variant={reachableVariant(go2rtc.reachable)}
-              label={go2rtc.reachable ? 'Reachable' : (go2rtc.error ?? 'Unreachable')}
-              size="xs"
-              dot
+          </p>
+
+          {/* Stat pills row */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs">
+            <StatPill
+              icon={<Video className="h-3.5 w-3.5" aria-hidden="true" />}
+              label="Cameras"
+              value={`${enabledCameras}/${totalCameras}`}
+              ok={frigate.reachable}
+            />
+            <span className="text-gray-400 dark:text-gray-700" aria-hidden="true">·</span>
+            <StatPill
+              icon={<Server className="h-3.5 w-3.5" aria-hidden="true" />}
+              label="Audio"
+              value={audioReady ? 'Ready' : 'Unavailable'}
+              ok={audioReady}
+            />
+            <span className="text-gray-400 dark:text-gray-700" aria-hidden="true">·</span>
+            <StatPill
+              icon={<Brain className="h-3.5 w-3.5" aria-hidden="true" />}
+              label="AI"
+              value={aiConnected ? (aiModel ?? 'Connected') : 'Disconnected'}
+              ok={aiConnected}
+            />
+            <span className="text-gray-400 dark:text-gray-700" aria-hidden="true">·</span>
+            <StatPill
+              icon={<Mic2 className="h-3.5 w-3.5" aria-hidden="true" />}
+              label="TTS"
+              value={ttsEngine}
+              ok
+            />
+            <span className="text-gray-400 dark:text-gray-700" aria-hidden="true">·</span>
+            <StatPill
+              icon={<Theater className="h-3.5 w-3.5" aria-hidden="true" />}
+              label="Mode"
+              value={modeName.replace(/_/g, ' ')}
+              ok
             />
           </div>
-        </li>
-        {/* AI Cost Estimate */}
-        {costPerDetection != null && (
-          <li className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2.5 dark:bg-gray-800/50">
-            <div className="flex items-center gap-2.5">
-              <DollarSign className="h-4 w-4 flex-shrink-0 text-emerald-400" aria-hidden="true" />
-              <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">
-                AI Cost
-              </span>
-              <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
-                {config?.ai?.primary?.model}
-              </span>
-            </div>
-            <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
-              {costPerDetection === 0
-                ? 'Free (local)'
-                : `~$${monthlyCost!.toFixed(2)}/mo (30/day)`}
-            </span>
-          </li>
-        )}
-      </ul>
-    </Card>
+        </div>
+
+        {/* ── RIGHT: last event ─────────────────────────────────────────── */}
+        <div
+          className={cn(
+            'flex-shrink-0 rounded-xl border border-gray-200 bg-gray-50 dark:border-gray-700/50 dark:bg-gray-800/50 px-4 py-3 sm:min-w-[200px]',
+          )}
+        >
+          {lastCamera && lastRel ? (
+            <>
+              <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-gray-500">
+                <Clock className="h-3 w-3" aria-hidden="true" />
+                Last Event
+              </p>
+              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                {lastRel}
+              </p>
+              <p className="mt-0.5 text-xs text-green-400 truncate">
+                {lastCamera.name}
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-gray-500">
+                <Clock className="h-3 w-3" aria-hidden="true" />
+                Last Event
+              </p>
+              <p className="text-sm text-gray-500 italic">No events yet</p>
+            </>
+          )}
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sub-component: StatPill
+// ---------------------------------------------------------------------------
+
+interface StatPillProps {
+  icon: ReactNode;
+  label: string;
+  value: string;
+  ok: boolean;
+}
+
+/**
+ * Compact label + value pair for the hero stat row.
+ * Green when the associated service is healthy, amber/gray when not.
+ */
+function StatPill({ icon, label, value, ok }: StatPillProps) {
+  return (
+    <span className="flex items-center gap-1.5">
+      <span className={ok ? 'text-gray-500 dark:text-gray-400' : 'text-gray-400 dark:text-gray-600'} aria-hidden="true">
+        {icon}
+      </span>
+      <span className="text-gray-500 dark:text-gray-500">{label}:</span>
+      <span className={cn('font-semibold', ok ? 'text-gray-800 dark:text-gray-200' : 'text-amber-500 dark:text-amber-400')}>
+        {value}
+      </span>
+    </span>
   );
 }

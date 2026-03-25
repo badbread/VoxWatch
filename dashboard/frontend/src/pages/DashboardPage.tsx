@@ -1,22 +1,31 @@
 /**
- * DashboardPage — main landing page with service status overview and
- * a read-only camera monitoring grid.
+ * DashboardPage — live security monitoring hub.
  *
- * Camera management (add, edit, configure) now lives entirely on the Cameras
- * page (/cameras).  Clicking a camera card here navigates to
- * /cameras?selected={name} so the user lands directly on that camera's detail.
+ * Redesigned from a config-heavy admin panel into a reactive status dashboard.
+ * Five sections, top to bottom:
+ *
+ *   1. System Hero        — full-width status card with pulsing dot, headline,
+ *                           stat row, and most-recent detection event.
+ *   2. Live Camera Grid   — visual card grid; clicking navigates to /cameras.
+ *   3. Recent Activity    — stacked detection event feed derived from status API.
+ *   4. Quick Actions      — three large nav buttons to the Tests page.
+ *   5. Support Banner     — dismissible "consider supporting" card.
+ *
+ * No new API calls — all data flows from `useServiceStatus()` and
+ * `useConfigQuery()` which are already polling on a shared interval.
  */
 
 import { useNavigate } from 'react-router-dom';
 import { ServiceStatusCard } from '@/components/status/ServiceStatusCard';
 import { CameraStatusGrid } from '@/components/status/CameraStatusGrid';
+import { RecentActivity } from '@/components/status/RecentActivity';
+import { QuickActions } from '@/components/status/QuickActions';
 import { ErrorBoundary } from '@/components/common/ErrorBoundary';
 import { SupportCard } from '@/components/common/SupportCard';
 import type { CameraStatus } from '@/types/status';
 
 /**
- * Main monitoring dashboard — simplified to status cards only.
- * Camera config and detail are delegated to CamerasPage.
+ * Main monitoring dashboard — reactive status-first layout.
  */
 export function DashboardPage() {
   const navigate = useNavigate();
@@ -30,22 +39,39 @@ export function DashboardPage() {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
+
+      {/* Section 1 — System Hero */}
       <ErrorBoundary>
         <ServiceStatusCard />
       </ErrorBoundary>
 
+      {/* Section 2 — Live Camera Grid */}
       <div>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-          Cameras
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-gray-400 dark:text-gray-600">
+          Live Cameras
         </h2>
         <ErrorBoundary>
           <CameraStatusGrid onCameraClick={handleCameraClick} />
         </ErrorBoundary>
       </div>
 
-      {/* Support card — dismissible, stays hidden after first close */}
+      {/* Section 3 — Recent Activity */}
+      <ErrorBoundary>
+        <RecentActivity />
+      </ErrorBoundary>
+
+      {/* Section 4 — Quick Actions */}
+      <div>
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-gray-400 dark:text-gray-600">
+          Quick Actions
+        </h2>
+        <QuickActions />
+      </div>
+
+      {/* Section 5 — Support Banner */}
       <SupportCard />
+
     </div>
   );
 }

@@ -79,7 +79,7 @@ export function Sidebar({ collapsed = false, onNavClick }: SidebarProps) {
   return (
     <aside
       className={cn(
-        'flex h-full flex-col border-r border-gray-200 bg-gray-50 dark:border-gray-700/50 dark:bg-gray-900',
+        'flex h-full flex-col border-r border-gray-200 bg-gray-50 dark:border-gray-800/60 dark:bg-gray-950',
         'transition-[width] duration-200',
         collapsed ? 'w-16' : 'w-64',
       )}
@@ -109,7 +109,7 @@ export function Sidebar({ collapsed = false, onNavClick }: SidebarProps) {
       {/* Navigation links */}
       <nav className="flex-1 overflow-y-auto py-4" aria-label="Main navigation">
         {/* Primary nav items */}
-        <ul className="space-y-0.5 px-2">
+        <ul className="space-y-1 px-2">
           {NAV_ITEMS.map(({ label, to, icon: Icon }) => (
             <li key={to}>
               <NavLink
@@ -118,17 +118,21 @@ export function Sidebar({ collapsed = false, onNavClick }: SidebarProps) {
                 onClick={onNavClick}
                 className={({ isActive }) =>
                   cn(
-                    'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
+                    'relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200',
                     'focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
                     isActive
-                      ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-400'
-                      : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100',
-                    collapsed && 'justify-center px-0',
+                      ? [
+                          'bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-400',
+                          'border-l-2 border-blue-500',
+                          !collapsed && 'pl-[10px]', // compensate for border width
+                        ]
+                      : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:hover:bg-gray-800/60 dark:hover:text-gray-200',
+                    collapsed && 'justify-center px-0 border-l-0',
                   )
                 }
                 title={collapsed ? label : undefined}
               >
-                <Icon className="h-4.5 w-4.5 flex-shrink-0" aria-hidden="true" />
+                <Icon className="h-5 w-5 flex-shrink-0" aria-hidden="true" />
                 {!collapsed && <span>{label}</span>}
               </NavLink>
             </li>
@@ -145,7 +149,7 @@ export function Sidebar({ collapsed = false, onNavClick }: SidebarProps) {
         />
 
         {/* Secondary nav items (Setup Wizard) */}
-        <ul className="space-y-0.5 px-2">
+        <ul className="space-y-1 px-2">
           {NAV_ITEMS_SECONDARY.map(({ label, to, icon: Icon }) => (
             <li key={to}>
               <NavLink
@@ -154,17 +158,21 @@ export function Sidebar({ collapsed = false, onNavClick }: SidebarProps) {
                 onClick={onNavClick}
                 className={({ isActive }) =>
                   cn(
-                    'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
+                    'relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200',
                     'focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
                     isActive
-                      ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-400'
-                      : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100',
-                    collapsed && 'justify-center px-0',
+                      ? [
+                          'bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-400',
+                          'border-l-2 border-blue-500',
+                          !collapsed && 'pl-[10px]',
+                        ]
+                      : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:hover:bg-gray-800/60 dark:hover:text-gray-200',
+                    collapsed && 'justify-center px-0 border-l-0',
                   )
                 }
                 title={collapsed ? label : undefined}
               >
-                <Icon className="h-4.5 w-4.5 flex-shrink-0" aria-hidden="true" />
+                <Icon className="h-5 w-5 flex-shrink-0" aria-hidden="true" />
                 {!collapsed && <span>{label}</span>}
               </NavLink>
             </li>

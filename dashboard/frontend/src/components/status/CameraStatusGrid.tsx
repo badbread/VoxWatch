@@ -62,10 +62,10 @@ export function CameraStatusGrid({ onCameraClick, selectedName }: CameraStatusGr
           aria-pressed={selectedName === camera.name}
           aria-label={`Select camera ${camera.name}`}
           className={cn(
-            'w-full cursor-pointer rounded-xl text-left transition-all',
-            'focus:outline-none focus:ring-2 focus:ring-blue-500',
-            onCameraClick && 'hover:ring-2 hover:ring-blue-500/50',
-            selectedName === camera.name && 'ring-2 ring-blue-500',
+            'w-full cursor-pointer rounded-2xl text-left transition-all duration-200',
+            'focus:outline-none focus-visible:ring-2 focus-visible:ring-green-500/60',
+            onCameraClick && 'hover:ring-1 hover:ring-green-500/30',
+            selectedName === camera.name && 'ring-2 ring-green-500/60',
           )}
         >
           <CameraStatusCard camera={camera} />

@@ -644,14 +644,14 @@ function MqttSimulationSection({ cameras }: { cameras: CameraStatus[] }) {
           Command to run
         </p>
         <div className="group relative">
-          <pre className="overflow-x-auto rounded-lg bg-gray-900 px-4 py-3 text-xs text-green-400 dark:bg-gray-950">
+          <pre className="overflow-x-auto rounded-lg bg-gray-800 dark:bg-gray-950 px-4 py-3 text-xs text-green-400">
             {command}
           </pre>
           <button
             type="button"
             onClick={handleCopy}
             className={cn(
-              'absolute right-2 top-2 rounded px-2 py-1 text-xs text-gray-400 transition-colors',
+              'absolute right-2 top-2 rounded px-2 py-1 text-xs text-gray-300 transition-colors',
               'hover:bg-gray-700 hover:text-gray-100',
               'opacity-0 group-hover:opacity-100',
             )}
@@ -881,7 +881,7 @@ function ServiceLogsSection() {
 
       {/* Log viewer */}
       <div
-        className="h-80 overflow-y-auto rounded-lg bg-gray-950 p-3 text-xs"
+        className="h-80 overflow-y-auto rounded-lg bg-gray-800 dark:bg-gray-950 p-3 text-xs"
         role="log"
         aria-live="polite"
         aria-label="VoxWatch service logs"

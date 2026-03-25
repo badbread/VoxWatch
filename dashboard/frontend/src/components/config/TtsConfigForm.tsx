@@ -314,12 +314,13 @@ const OPENAI_VOICES = [
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Format estimated cost per clip as human-readable string. */
-function formatCostPerClip(cost: number): string {
-  if (cost === 0) return 'Free';
-  if (cost < 0.001) return `~$${(cost * 10000).toFixed(1)}/10K clips`;
-  if (cost < 0.01)  return `~$${(cost * 1000).toFixed(1)}/1K clips`;
-  return `~$${cost.toFixed(3)}/clip`;
+/** Format estimated cost per event (worst case: 3 TTS generations per detection). */
+function formatCostPerEvent(cost: number): string {
+  const perEvent = cost * 3; // worst case: initial response + escalation + resolution
+  if (perEvent === 0) return 'Free';
+  if (perEvent < 0.001) return `<$0.001`;
+  if (perEvent < 0.01)  return `~$${perEvent.toFixed(3)}`;
+  return `~$${perEvent.toFixed(2)}`;
 }
 
 /** Tailwind color class for cost display. */
@@ -711,7 +712,7 @@ function PiperFields({
             </code>{' '}
             build args and rebuild:
           </p>
-          <pre className="mt-2 rounded-lg bg-gray-900 p-3 text-xs text-green-400 overflow-x-auto">
+          <pre className="mt-2 rounded-lg bg-gray-800 dark:bg-gray-900 p-3 text-xs text-green-400 overflow-x-auto">
 {`services:
   voxwatch:
     build:
@@ -1154,9 +1155,9 @@ function ProviderBanner({ meta }: { meta: ProviderMeta }) {
       <div className="text-right">
         <p className={cn('text-sm font-semibold', costColor(meta.costPerClip))}>
           <DollarSign className="mr-0.5 inline h-3.5 w-3.5" />
-          {formatCostPerClip(meta.costPerClip)}
+          {formatCostPerEvent(meta.costPerClip)}
         </p>
-        <p className="text-xs text-gray-400 dark:text-gray-500">per clip</p>
+        <p className="text-xs text-gray-400 dark:text-gray-500">per event</p>
       </div>
     </div>
   );
@@ -1208,9 +1209,16 @@ export function TtsConfigForm({ value, onChange, errors, activePersona = 'standa
           onChange={(e) => set('engine', e.target.value)}
           className={inputCls(!!errorForField(errors, 'tts.engine'))}
         >
-          {PROVIDERS.map((p) => (
-            <option key={p.id} value={p.id}>{p.label}</option>
-          ))}
+          <optgroup label="Free / Local">
+            {PROVIDERS.filter((p) => p.costPerClip === 0).map((p) => (
+              <option key={p.id} value={p.id}>{p.label}</option>
+            ))}
+          </optgroup>
+          <optgroup label="Cloud (paid)">
+            {PROVIDERS.filter((p) => p.costPerClip > 0).map((p) => (
+              <option key={p.id} value={p.id}>{p.label}</option>
+            ))}
+          </optgroup>
         </select>
       </Field>
 
