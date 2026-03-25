@@ -518,6 +518,36 @@ Contributors who test cameras receive:
 - Mention in project CHANGELOG
 - Access to contributor-only Discord channel (if applicable)
 
+## Important Notes
+
+### Reolink Home Assistant Integration Does NOT Support Speakers
+
+The official Home Assistant Reolink integration does **NOT** expose camera speakers as `media_player` entities. TTS/audio playback through the HA Reolink integration is explicitly unsupported. You **cannot** use Home Assistant's `tts.speak` or `media_player.play_media` services to push audio to Reolink camera speakers.
+
+VoxWatch bypasses this limitation entirely by using go2rtc's RTSP backchannel directly — it never touches Home Assistant for audio output.
+
+### Speaker Channel Locking (Reolink)
+
+Reolink cameras can lock the speaker channel when another session is using it. If you see "A user is using the speaker" errors, it means another application (or a previous VoxWatch push that hasn't fully disconnected) still holds the backchannel.
+
+VoxWatch handles this automatically — if a speaker lock is detected, it retries once after a 3-second delay. If you frequently see speaker lock errors in the logs, check for other applications that might be using the camera's two-way audio (e.g., Reolink's own app, Home Assistant, or a browser with the go2rtc WebRTC page open).
+
+### ONVIF URL vs Native RTSP URL (Dahua Cameras)
+
+Dahua cameras configured with ONVIF URLs (`?subtype=MediaProfile00002`) do **NOT** expose the backchannel track in their SDP. You **must** use the Dahua native RTSP URL format:
+
+```
+# WRONG — no backchannel
+rtsp://admin:password@10.1.2.8?subtype=MediaProfile00002
+
+# CORRECT — backchannel available
+rtsp://admin:password@10.1.2.8:554/cam/realmonitor?channel=1&subtype=2&unicast=true&proto=Onvif
+```
+
+This is a go2rtc/Dahua firmware behavior — the ONVIF RTSP profile simply doesn't include the backchannel media description in the SDP response.
+
+---
+
 ## Troubleshooting
 
 ### Audio Plays But Distorted
