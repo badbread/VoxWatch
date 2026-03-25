@@ -9,8 +9,21 @@
  * A prominent recommendation banner points users toward Kokoro for near-human
  * quality (free, local) and ElevenLabs for premium cloud quality.
  *
- * A voice preview button is shown for engines where the backend can synthesise
- * a sample clip.
+ * Provider-specific config fields are shown inline when an engine is selected:
+ *   Kokoro     → Kokoro server URL (http://host:8880)
+ *   ElevenLabs → API key
+ *   OpenAI     → API key
+ *   Cartesia   → API key
+ *   Polly      → AWS region
+ *   Piper/eSpeak → no extra fields needed
+ *
+ * The voice preview button is only enabled when required fields are filled:
+ *   - Cloud engines: API key must be non-empty.
+ *   - Kokoro: server URL must be non-empty.
+ *   - Piper/eSpeak: always enabled (local, no config needed).
+ *
+ * All provider-specific config is forwarded through onNext so the wizard
+ * state captures it for config.yaml generation.
  */
 
 import { useState } from 'react';
@@ -27,12 +40,27 @@ import { useMutation } from '@tanstack/react-query';
 import { cn } from '@/utils/cn';
 import { previewAudio } from '@/api/status';
 
+// ---------------------------------------------------------------------------
+// Props
+// ---------------------------------------------------------------------------
+
+/** Provider-specific config fields captured for this TTS step. */
+export interface TtsProviderConfig {
+  /** Kokoro server base URL (e.g. http://10.1.10.25:8880). */
+  kokoro_host?: string;
+  /** API key for cloud TTS providers (ElevenLabs, OpenAI, Cartesia). */
+  api_key?: string;
+  /** AWS region for Amazon Polly. */
+  aws_region?: string;
+}
+
 /** Props for TtsProviderStep. */
 interface TtsProviderStepProps {
   ttsEngine: string;
   ttsVoice: string;
+  ttsProviderConfig: TtsProviderConfig;
   responseMode: string;
-  onNext: (engine: string, voice: string) => void;
+  onNext: (engine: string, voice: string, providerConfig: TtsProviderConfig) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -52,7 +80,6 @@ interface TtsEngineDef {
   group: 'local' | 'cloud';
   icon: React.ElementType;
   voices: VoiceOption[];
-  needsApiKey?: boolean;
 }
 
 const TTS_ENGINES: TtsEngineDef[] = [
@@ -100,7 +127,6 @@ const TTS_ENGINES: TtsEngineDef[] = [
     tagline: 'Best voice quality available. Requires API key.',
     group: 'cloud',
     icon: Globe,
-    needsApiKey: true,
     voices: [
       { id: 'Rachel', label: 'Rachel (female, calm)', recommended: true },
       { id: 'Adam', label: 'Adam (male, deep)' },
@@ -113,7 +139,6 @@ const TTS_ENGINES: TtsEngineDef[] = [
     tagline: 'Fastest cloud latency. Great for real-time deterrents.',
     group: 'cloud',
     icon: Globe,
-    needsApiKey: true,
     voices: [
       { id: 'default', label: 'Default voice', recommended: true },
     ],
@@ -124,7 +149,6 @@ const TTS_ENGINES: TtsEngineDef[] = [
     tagline: 'Budget cloud. Requires AWS credentials.',
     group: 'cloud',
     icon: Globe,
-    needsApiKey: true,
     voices: [
       { id: 'Matthew', label: 'Matthew (male)', recommended: true },
       { id: 'Joanna', label: 'Joanna (female)' },
@@ -136,7 +160,6 @@ const TTS_ENGINES: TtsEngineDef[] = [
     tagline: 'Good cloud quality. Uses your OpenAI API key.',
     group: 'cloud',
     icon: Globe,
-    needsApiKey: true,
     voices: [
       { id: 'alloy', label: 'Alloy (neutral)', recommended: true },
       { id: 'echo', label: 'Echo (male)' },
@@ -155,20 +178,155 @@ const inputCls = cn(
   'focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50',
 );
 
+const labelCls = 'mb-1.5 block text-sm font-medium text-gray-300';
+
+// ---------------------------------------------------------------------------
+// Provider-specific config panel
+// ---------------------------------------------------------------------------
+
+interface ProviderConfigPanelProps {
+  engineId: string;
+  config: TtsProviderConfig;
+  onChange: (updated: TtsProviderConfig) => void;
+}
+
 /**
- * TTS engine selector with local/cloud grouping and voice preview.
+ * Renders the provider-specific config fields for the selected TTS engine.
+ * Returns null for Piper and eSpeak (no additional config needed).
+ *
+ * @param engineId - The currently selected TTS engine ID.
+ * @param config   - Current provider config state.
+ * @param onChange - Callback to update the provider config.
+ */
+function ProviderConfigPanel({ engineId, config, onChange }: ProviderConfigPanelProps) {
+  if (engineId === 'kokoro') {
+    return (
+      <div>
+        <label htmlFor="tts-kokoro-host" className={labelCls}>
+          Kokoro server URL
+        </label>
+        <input
+          id="tts-kokoro-host"
+          type="url"
+          value={config.kokoro_host ?? ''}
+          onChange={(e) => onChange({ ...config, kokoro_host: e.target.value })}
+          placeholder="http://10.1.10.25:8880"
+          autoComplete="off"
+          className={inputCls}
+        />
+        <p className="mt-1 text-xs text-gray-600">
+          The base URL of your running Kokoro TTS server instance.
+        </p>
+      </div>
+    );
+  }
+
+  if (engineId === 'elevenlabs' || engineId === 'openai' || engineId === 'cartesia') {
+    const labels: Record<string, string> = {
+      elevenlabs: 'ElevenLabs API key',
+      openai: 'OpenAI API key',
+      cartesia: 'Cartesia API key',
+    };
+    return (
+      <div>
+        <label htmlFor="tts-api-key" className={labelCls}>
+          {labels[engineId]}
+        </label>
+        <input
+          id="tts-api-key"
+          type="password"
+          value={config.api_key ?? ''}
+          onChange={(e) => onChange({ ...config, api_key: e.target.value })}
+          placeholder="sk-..."
+          autoComplete="off"
+          className={inputCls}
+        />
+      </div>
+    );
+  }
+
+  if (engineId === 'polly') {
+    return (
+      <div>
+        <label htmlFor="tts-aws-region" className={labelCls}>
+          AWS region
+        </label>
+        <input
+          id="tts-aws-region"
+          type="text"
+          value={config.aws_region ?? ''}
+          onChange={(e) => onChange({ ...config, aws_region: e.target.value })}
+          placeholder="us-east-1"
+          autoComplete="off"
+          className={inputCls}
+        />
+        <p className="mt-1 text-xs text-gray-600">
+          AWS credentials must be configured via environment variables or IAM role.
+        </p>
+      </div>
+    );
+  }
+
+  // Piper and eSpeak need no extra config
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Preview enablement logic
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns true when the preview button should be enabled for the given engine
+ * and provider config state.
+ *
+ * Rules:
+ *   piper / espeak → always enabled (local, no credentials needed).
+ *   kokoro         → enabled when kokoro_host is filled.
+ *   cloud engines  → enabled when api_key is non-empty.
+ *   polly          → enabled when aws_region is filled (credentials via env).
+ */
+function isPreviewEnabled(engineId: string, config: TtsProviderConfig): boolean {
+  switch (engineId) {
+    case 'piper':
+    case 'espeak':
+      return true;
+    case 'kokoro':
+      return Boolean(config.kokoro_host?.trim());
+    case 'polly':
+      return Boolean(config.aws_region?.trim());
+    default:
+      // elevenlabs, openai, cartesia
+      return Boolean(config.api_key?.trim());
+  }
+}
+
+// ---------------------------------------------------------------------------
+// TtsProviderStep
+// ---------------------------------------------------------------------------
+
+/**
+ * TTS engine selector with local/cloud grouping, provider config fields,
+ * and a conditional voice preview.
  *
  * @example
- *   <TtsProviderStep ttsEngine="piper" ttsVoice="en_US-lessac-medium" responseMode="live_operator" onNext={...} />
+ *   <TtsProviderStep
+ *     ttsEngine="piper"
+ *     ttsVoice="en_US-lessac-medium"
+ *     ttsProviderConfig={{}}
+ *     responseMode="live_operator"
+ *     onNext={...}
+ *   />
  */
 export function TtsProviderStep({
   ttsEngine: initialEngine,
   ttsVoice: initialVoice,
+  ttsProviderConfig: initialProviderConfig,
   responseMode,
   onNext,
 }: TtsProviderStepProps) {
   const [engine, setEngine] = useState(initialEngine);
   const [voice, setVoice] = useState(initialVoice);
+  const [providerConfig, setProviderConfig] = useState<TtsProviderConfig>(initialProviderConfig);
 
   const engineDef = TTS_ENGINES.find((e) => e.id === engine);
 
@@ -177,7 +335,11 @@ export function TtsProviderStep({
     const def = TTS_ENGINES.find((e) => e.id === newEngine);
     const defaultVoice = def?.voices.find((v) => v.recommended) ?? def?.voices[0];
     setVoice(defaultVoice?.id ?? '');
+    // Reset provider config when switching engines to avoid stale values
+    setProviderConfig({});
   };
+
+  const previewEnabled = isPreviewEnabled(engine, providerConfig);
 
   const previewMutation = useMutation({
     mutationFn: () =>
@@ -185,6 +347,7 @@ export function TtsProviderStep({
         persona: responseMode,
         voice,
         provider: engine,
+        provider_host: providerConfig.kokoro_host,
       }),
     onSuccess: (result) => {
       const url = URL.createObjectURL(result.blob);
@@ -273,10 +436,17 @@ export function TtsProviderStep({
         </div>
       </div>
 
+      {/* Provider-specific config fields (Kokoro URL / API key / AWS region) */}
+      <ProviderConfigPanel
+        engineId={engine}
+        config={providerConfig}
+        onChange={setProviderConfig}
+      />
+
       {/* Voice selector */}
       {engineDef && engineDef.voices.length > 1 && (
         <div>
-          <label htmlFor="tts-voice" className="mb-1.5 block text-sm font-medium text-gray-300">
+          <label htmlFor="tts-voice" className={labelCls}>
             Voice
           </label>
           <select
@@ -294,17 +464,24 @@ export function TtsProviderStep({
         </div>
       )}
 
-      {/* Voice preview */}
+      {/* Voice preview — disabled until required config fields are filled */}
       <button
         type="button"
         onClick={() => previewMutation.mutate()}
-        disabled={previewMutation.isPending}
+        disabled={!previewEnabled || previewMutation.isPending}
+        title={
+          previewEnabled
+            ? 'Play a sample phrase with the selected voice'
+            : 'Fill in the required fields above to enable preview'
+        }
         className={cn(
           'flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold',
-          'border border-gray-600 bg-gray-800 text-gray-300 hover:bg-gray-700',
-          'transition-all active:scale-[0.98]',
+          'border transition-all active:scale-[0.98]',
           'focus:outline-none focus:ring-2 focus:ring-blue-500',
           'disabled:cursor-not-allowed disabled:opacity-50',
+          previewEnabled
+            ? 'border-gray-600 bg-gray-800 text-gray-300 hover:bg-gray-700'
+            : 'border-gray-700 bg-gray-900 text-gray-600',
         )}
       >
         {previewMutation.isPending ? (
@@ -315,9 +492,20 @@ export function TtsProviderStep({
         {previewMutation.isPending ? 'Generating preview...' : 'Preview voice'}
       </button>
 
+      {/* Helper text when preview is disabled */}
+      {!previewEnabled && (
+        <p className="text-xs text-gray-600 text-center -mt-3">
+          {engine === 'kokoro'
+            ? 'Enter the Kokoro server URL above to enable preview.'
+            : engine === 'polly'
+              ? 'Enter the AWS region above to enable preview.'
+              : 'Enter an API key above to enable preview.'}
+        </p>
+      )}
+
       {/* Continue */}
       <button
-        onClick={() => onNext(engine, voice)}
+        onClick={() => onNext(engine, voice, providerConfig)}
         className={cn(
           'flex w-full items-center justify-center gap-3 rounded-xl px-6 py-4',
           'bg-blue-600 hover:bg-blue-500 text-base font-semibold text-white',

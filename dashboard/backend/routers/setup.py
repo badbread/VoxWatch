@@ -211,6 +211,11 @@ class ProbeResult(BaseModel):
                             stream name.  Each value has has_backchannel (bool)
                             and codecs (list of RTSP codec strings).
         mqtt_reachable:     True when the MQTT broker accepted a connection.
+        mqtt_host_detected: MQTT host extracted from Frigate's /api/config,
+                            or null when Frigate is unreachable or MQTT is not
+                            configured in Frigate.
+        mqtt_port_detected: MQTT port extracted from Frigate's /api/config,
+                            or null when not available.
         errors:             List of non-fatal error messages from individual
                             probe steps that did not prevent other probes.
         probe_duration_ms:  Total wall-clock time for all probes in milliseconds.
@@ -247,6 +252,20 @@ class ProbeResult(BaseModel):
     )
     mqtt_reachable: bool = Field(
         description="True when the MQTT broker accepted a TCP connection."
+    )
+    mqtt_host_detected: Optional[str] = Field(
+        default=None,
+        description=(
+            "MQTT host extracted from Frigate's /api/config mqtt.host field. "
+            "Null when Frigate is unreachable or mqtt.host is not set."
+        ),
+    )
+    mqtt_port_detected: Optional[int] = Field(
+        default=None,
+        description=(
+            "MQTT port extracted from Frigate's /api/config mqtt.port field. "
+            "Null when Frigate is unreachable or mqtt.port is not set."
+        ),
     )
     errors: List[str] = Field(
         default_factory=list,
@@ -410,11 +429,15 @@ async def _probe_frigate(
     host: str,
     ports: List[int],
     errors: List[str],
-) -> tuple[bool, Optional[str], List[str]]:
-    """Try each port in *ports* and return (reachable, version, cameras).
+) -> tuple[bool, Optional[str], List[str], Optional[str], Optional[int]]:
+    """Try each port in *ports* and return (reachable, version, cameras, mqtt_host, mqtt_port).
 
     Iterates through the port list and returns on the first successful
     connection.  Non-fatal errors are appended to *errors*.
+
+    Also reads Frigate's /api/config to extract the mqtt.host and mqtt.port
+    fields so the wizard can pre-fill MQTT settings using Frigate's own
+    configuration rather than assuming co-location.
 
     Args:
         session: Shared aiohttp session (caller owns lifecycle).
@@ -423,7 +446,8 @@ async def _probe_frigate(
         errors:  Mutable list to append non-fatal error strings to.
 
     Returns:
-        3-tuple of (reachable, version_string_or_None, camera_name_list).
+        5-tuple of (reachable, version_string_or_None, camera_name_list,
+                    mqtt_host_or_None, mqtt_port_or_None).
     """
     timeout = aiohttp.ClientTimeout(total=_PROBE_TIMEOUT_SECONDS)
     for port in ports:
@@ -440,8 +464,10 @@ async def _probe_frigate(
                     continue
                 version = (await resp.text()).strip().strip('"')
 
-            # Probe cameras from the Frigate config
+            # Probe cameras and MQTT settings from the Frigate config
             cameras: List[str] = []
+            mqtt_host_detected: Optional[str] = None
+            mqtt_port_detected: Optional[int] = None
             try:
                 async with session.get(
                     f"{base_url}/api/config", timeout=timeout
@@ -449,15 +475,26 @@ async def _probe_frigate(
                     if cfg_resp.status == 200:
                         cfg_data = await cfg_resp.json()
                         cameras = list(cfg_data.get("cameras", {}).keys())
+                        # Extract Frigate's MQTT config so the wizard can
+                        # pre-fill accurate values instead of assuming the
+                        # MQTT broker is co-located with Frigate.
+                        mqtt_cfg = cfg_data.get("mqtt", {})
+                        if isinstance(mqtt_cfg, dict):
+                            raw_host = mqtt_cfg.get("host")
+                            raw_port = mqtt_cfg.get("port")
+                            if isinstance(raw_host, str) and raw_host:
+                                mqtt_host_detected = raw_host
+                            if isinstance(raw_port, int) and raw_port > 0:
+                                mqtt_port_detected = raw_port
             except Exception as cam_exc:
-                errors.append(f"Frigate cameras probe failed: {cam_exc}")
+                errors.append(f"Frigate config probe failed: {cam_exc}")
 
-            return True, version, cameras
+            return True, version, cameras, mqtt_host_detected, mqtt_port_detected
 
         except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
             errors.append(f"Frigate port {port}: {exc}")
 
-    return False, None, []
+    return False, None, [], None, None
 
 
 async def _probe_go2rtc(
@@ -748,7 +785,7 @@ async def probe_services(req: ProbeRequest) -> ProbeResult:
 
     probe_duration_ms = int((time.monotonic() - probe_start) * 1000)
 
-    frigate_reachable, frigate_version, frigate_cameras = frigate_result
+    frigate_reachable, frigate_version, frigate_cameras, mqtt_host_detected, mqtt_port_detected = frigate_result
     go2rtc_reachable, go2rtc_version, go2rtc_streams, backchannel_info = go2rtc_result
     mqtt_reachable: bool = bool(mqtt_result)
 
@@ -761,6 +798,8 @@ async def probe_services(req: ProbeRequest) -> ProbeResult:
         go2rtc_streams=go2rtc_streams,
         backchannel_info=backchannel_info,
         mqtt_reachable=mqtt_reachable,
+        mqtt_host_detected=mqtt_host_detected,
+        mqtt_port_detected=mqtt_port_detected,
         errors=errors,
         probe_duration_ms=probe_duration_ms,
     )
