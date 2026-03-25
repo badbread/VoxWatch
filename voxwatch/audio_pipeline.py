@@ -472,6 +472,32 @@ class AudioPipeline:
                         return True
                     else:
                         body = await resp.text()
+                        # Reolink cameras can lock the speaker channel when
+                        # another session is using it ("A user is using the
+                        # speaker").  Retry once after a short delay.
+                        if "using the speaker" in body.lower() or "speaker" in body.lower():
+                            logger.warning(
+                                "Camera speaker locked on %s — retrying in 3s",
+                                camera_stream,
+                            )
+                            await asyncio.sleep(3.0)
+                            async with session.post(
+                                api_url,
+                                timeout=aiohttp.ClientTimeout(total=total_timeout),
+                            ) as retry_resp:
+                                if retry_resp.status == 200:
+                                    wait_time = duration + 2.0
+                                    await asyncio.sleep(wait_time)
+                                    self._warmed_up[camera_stream] = time.monotonic()
+                                    logger.info(
+                                        "Speaker retry succeeded on %s", camera_stream
+                                    )
+                                    return True
+                                logger.error(
+                                    "Speaker retry also failed (HTTP %d)",
+                                    retry_resp.status,
+                                )
+                                return False
                         logger.error("go2rtc rejected audio push (HTTP %d): %s",
                                      resp.status, body[:200])
                         return False
