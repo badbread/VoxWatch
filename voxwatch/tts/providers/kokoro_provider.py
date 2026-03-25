@@ -144,17 +144,31 @@ class KokoroProvider(TTSProvider):
         else:
             await self._warmup_local()
 
+    async def _get_session(self) -> aiohttp.ClientSession:
+        """Get or create the shared aiohttp session.
+
+        Reuses the same session across all requests to avoid the
+        'Unclosed client session' warnings that occur when creating
+        a new session per request.
+
+        Returns:
+            Active aiohttp.ClientSession instance.
+        """
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=30),
+            )
+        return self._session
+
     async def _warmup_remote(self) -> None:
         """Create HTTP session and verify remote Kokoro server is reachable.
 
         Raises:
             TTSProviderError: If the server health endpoint is unreachable.
         """
-        self._session = aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=30),
-        )
+        session = await self._get_session()
         try:
-            async with self._session.get(f"{self._host}/health") as resp:
+            async with session.get(f"{self._host}/health") as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     logger.info(
@@ -236,10 +250,7 @@ class KokoroProvider(TTSProvider):
         Raises:
             TTSProviderError: If the HTTP request fails or returns non-200.
         """
-        if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=30),
-            )
+        session = await self._get_session()
 
         payload = {
             "text": message,
@@ -248,7 +259,7 @@ class KokoroProvider(TTSProvider):
         }
 
         try:
-            async with self._session.post(
+            async with session.post(
                 f"{self._host}/tts",
                 json=payload,
             ) as resp:
