@@ -170,6 +170,15 @@ class TTSProvider(ABC):
         un-overridden for providers that have no meaningful startup cost.
         """
 
+    async def close(self) -> None:
+        """Optional shutdown hook to release provider resources.
+
+        Called during service shutdown to close HTTP sessions, release
+        GPU memory, or clean up temporary files.  The default does nothing.
+        Providers with persistent connections (kokoro, elevenlabs) should
+        override this to close their aiohttp sessions cleanly.
+        """
+
     def estimate_duration(self, message: str) -> float:
         """Estimate the spoken duration of a message in seconds.
 
