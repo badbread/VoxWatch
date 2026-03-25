@@ -157,7 +157,7 @@ class AiTestRequest(BaseModel):
     """Request body for POST /api/system/test-ai."""
 
     provider: str = Field(description="AI provider to test (gemini, openai, anthropic, grok, ollama)")
-    model: str = Field(description="Model name to test (e.g. gemini-3.1-flash)")
+    model: str = Field(description="Model name to test (e.g. gemini-2.5-flash)")
     api_key: Optional[str] = Field(default=None, description="API key (not needed for ollama)")
     host: Optional[str] = Field(default=None, description="Host URL for self-hosted providers")
 

@@ -115,7 +115,7 @@ export interface GenerateConfigRequest {
   mqtt_topic: string;
   /** AI provider identifier (e.g. "gemini", "openai", "ollama", "none"). */
   ai_provider: string;
-  /** AI model identifier (e.g. "gemini-3.1-flash"). */
+  /** AI model identifier (e.g. "gemini-2.5-flash"). */
   ai_model: string;
   /** AI API key (empty string for local providers). */
   ai_api_key: string;

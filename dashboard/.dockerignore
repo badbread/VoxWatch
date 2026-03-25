@@ -1,0 +1,32 @@
+# ── Secrets ──────────────────────────────────────────────────────────────────
+.env
+*.env
+.env.*
+
+# ── Version control and CI ───────────────────────────────────────────────────
+.git
+.gitignore
+.github
+.claude
+
+# ── Documentation ────────────────────────────────────────────────────────────
+*.md
+LICENSE
+
+# ── Frontend build artifacts (rebuilt in Stage 1 from source) ────────────────
+# Exclude the local dist/ and node_modules/ from the build context so Docker
+# does not ship hundreds of MB of pre-existing node_modules into the builder.
+# Stage 1 runs npm ci from scratch inside the container.
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/tsconfig.app.tsbuildinfo
+frontend/tsconfig.node.tsbuildinfo
+
+# ── Python bytecode and cache ────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/

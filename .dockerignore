@@ -1,17 +1,41 @@
-# Prevent secrets and dev artifacts from being copied into Docker images
-config/deploy-config.yaml
-.git
-.gitignore
+# ── Secrets and local configuration ─────────────────────────────────────────
 .env
 *.env
 .env.*
-tests/
-docs/
+config/deploy-config.yaml
+
+# ── Version control and CI ───────────────────────────────────────────────────
+.git
+.gitignore
+.github
+.claude
+
+# ── Documentation and branding (not needed in the image) ────────────────────
 *.md
 LICENSE
-.claude/
+CONTRIBUTING.md
+docs/
+branding/
+assets/
+
+# ── Test artifacts ───────────────────────────────────────────────────────────
+tests/
+test_tts_output/
+ruff.toml
+
+# ── Dashboard (built separately in its own image) ────────────────────────────
+dashboard/
+
+# ── Python bytecode and cache ────────────────────────────────────────────────
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ── Node / frontend (not used by voxwatch service) ───────────────────────────
 node_modules/
 .vite/
 dist/

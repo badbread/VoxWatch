@@ -1,5 +1,5 @@
 aiohttp>=3.9.0
-google-generativeai>=0.8.0
+# Gemini uses REST API directly via aiohttp — no SDK needed
 paho-mqtt>=2.0.0
 pyyaml>=6.0
 astral>=3.2
@@ -7,9 +7,18 @@ Pillow>=10.0.0
 requests>=2.31.0
 reolink-aio>=0.9.0
 
-# TTS providers (optional - only needed if using that provider)
-elevenlabs    # ElevenLabs TTS
-cartesia      # Cartesia Sonic TTS
-boto3         # Amazon Polly TTS
-# openai      # Already listed for AI vision
-# kokoro-onnx # Kokoro local TTS (install separately if using GPU)
+# ── Optional TTS cloud provider SDKs ────────────────────────────────────────
+# These are NOT installed in the base Docker image because they add ~150MB
+# and are only needed when the user selects that specific TTS provider.
+# Each provider module uses a lazy import pattern (import inside function body)
+# so the service starts fine without them.
+#
+# To use a cloud TTS provider, install the SDK at runtime:
+#   docker exec voxwatch pip install elevenlabs   # ElevenLabs TTS
+#   docker exec voxwatch pip install cartesia     # Cartesia Sonic TTS
+#   docker exec voxwatch pip install boto3        # Amazon Polly TTS
+#
+# elevenlabs    # ElevenLabs TTS
+# cartesia      # Cartesia Sonic TTS
+# boto3         # Amazon Polly TTS
+# kokoro-onnx   # Kokoro local TTS (install separately if using GPU)

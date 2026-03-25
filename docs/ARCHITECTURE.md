@@ -114,7 +114,7 @@ VoxWatch implements a three-stage escalating warning system, balancing response 
 - **Concurrency:** Python `asyncio` for I/O, `threading` for parallel stages
 
 #### AI Vision (Dual-Model Strategy)
-- **Primary:** Google Gemini 3.1 Flash
+- **Primary:** Google Gemini 2.5 Flash
   - Cloud-based, low latency (2-3 seconds)
   - Requires API key and internet connectivity
   - Supports image and video analysis
@@ -270,7 +270,7 @@ voxwatch:
     gemini:
       enabled: true
       api_key: ${GEMINI_API_KEY}  # Set via environment variable
-      model: "gemini-3.1-flash"
+      model: "gemini-2.5-flash"
 
     # Fallback: Local Ollama
     ollama:

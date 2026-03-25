@@ -218,6 +218,13 @@ export function SetupWizard() {
         goTo('discovery');
       } catch (err) {
         dispatch({ type: 'SET_PROBING', value: false });
+        // 409 = config.yaml already exists. Redirect to dashboard instead of showing error.
+        const is409 = err instanceof Error && err.message.includes('409');
+        if (is409) {
+          setFrigateError('VoxWatch is already configured. Redirecting to dashboard...');
+          setTimeout(() => { window.location.href = '/'; }, 2000);
+          return;
+        }
         const msg = err instanceof Error ? err.message : 'Could not reach Frigate. Check the hostname and try again.';
         setFrigateError(msg);
       }

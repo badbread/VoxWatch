@@ -57,11 +57,10 @@ const PROVIDERS: ProviderInfo[] = [
     needsApiKey: true,
     needsHost: false,
     models: [
-      { id: 'gemini-3.1-flash', name: 'Gemini 3.1 Flash', desc: 'Fast, cheap, multi-image + video. Best default.', costPerDetection: 0.001, recommended: true, supportsVideo: true },
-      { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash Lite', desc: 'Ultra-cheap. Great for high-volume deployments.', costPerDetection: 0.0003, supportsVideo: true },
-      { id: 'gemini-3.1-pro', name: 'Gemini 3.1 Pro', desc: 'Most accurate. Best descriptions, higher cost.', costPerDetection: 0.01, supportsVideo: true },
-      { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', desc: 'Previous gen. Still reliable and fast.', costPerDetection: 0.001, supportsVideo: true },
-      { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', desc: 'Previous gen pro. Good accuracy.', costPerDetection: 0.008, supportsVideo: true },
+      { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', desc: 'Fast, cheap, multi-image + video. Best default.', costPerDetection: 0.001, recommended: true, supportsVideo: true },
+      { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite', desc: 'Ultra-cheap. Great for high-volume deployments.', costPerDetection: 0.0003, supportsVideo: true },
+      { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', desc: 'Most accurate. Best descriptions, higher cost.', costPerDetection: 0.01, supportsVideo: true },
+      { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', desc: 'Previous gen. Retiring June 2026.', costPerDetection: 0.001, supportsVideo: true },
     ],
   },
   {

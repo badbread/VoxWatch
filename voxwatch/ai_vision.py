@@ -11,9 +11,9 @@ Handles all computer-vision work in the Stage 2 and Stage 3 deterrent pipeline:
 Supported providers (configure under ``ai.primary.provider`` and
 ``ai.fallback.provider`` in config.yaml):
 
-  ``gemini``    — Google Gemini Flash via the google-generativeai SDK.
-                  Supports multiple images and video.  SDK is synchronous so
-                  calls run in asyncio.to_thread().
+  ``gemini``    — Google Gemini via the Gemini REST API (no SDK).
+                  Supports multiple images and video.  Uses raw aiohttp — no
+                  google-generativeai SDK required.
   ``openai``    — OpenAI chat completions API (gpt-4o, gpt-4-vision-preview, etc.)
                   Supports multiple images.  Uses raw aiohttp — no openai SDK.
   ``grok``      — xAI Grok API.  OpenAI-compatible endpoint, same code path as
@@ -49,8 +49,8 @@ Stage 3 usage (behavior analysis):
         analysis = await analyze_snapshots(images, STAGE3_PROMPT, config)
 
 Prerequisites:
-  - pip install aiohttp google-generativeai
-  - For Gemini: GEMINI_API_KEY env var set (or api_key in config)
+  - pip install aiohttp
+  - For Gemini: api_key set in config (or via env var substitution) — no SDK needed
   - For OpenAI/Grok/Anthropic/custom: api_key set in config (or via env var substitution)
   - For Ollama: Ollama running locally with a vision model pulled (ollama pull llava:7b)
 """
@@ -58,9 +58,6 @@ Prerequisites:
 import asyncio
 import base64
 import logging
-import os
-import tempfile
-import threading
 from typing import Optional
 
 import aiohttp
@@ -90,20 +87,6 @@ def _frigate_base_url(config: dict) -> str:
     port = frigate_cfg.get("port", 5000)
     return f"http://{host}:{port}"
 
-
-# ── Gemini thread-safety lock ─────────────────────────────────────────────────
-# google-generativeai's genai.configure() sets a module-level global API key.
-# If two asyncio.to_thread() calls run concurrently (e.g. Stage 2 image
-# analysis and Stage 3 video analysis triggered by simultaneous camera events),
-# one thread could call configure() while the other is mid-request, potentially
-# using the wrong key or corrupting the SDK's internal state.
-#
-# _GEMINI_LOCK serialises the configure() + GenerativeModel() setup phase so
-# only one thread initialises the SDK at a time.  The actual generate_content()
-# network call is made while the lock is held, keeping the critical section
-# short enough that contention is negligible in practice (calls typically take
-# 1-3 seconds and simultaneous Stage 2+3 events are rare).
-_GEMINI_LOCK = threading.Lock()
 
 logger = logging.getLogger("voxwatch.ai_vision")
 
@@ -1173,91 +1156,107 @@ async def _call_gemini_images(
     prompt: str,
     config: dict,
 ) -> str:
-    """Call Google Gemini Flash with one or more JPEG images and return the response.
+    """Call Google Gemini with one or more JPEG images via the REST API.
 
-    The google-generativeai SDK is synchronous, so we run it in a thread pool
-    via asyncio.to_thread() to avoid blocking the event loop.
+    Uses the Gemini ``generateContent`` REST endpoint directly via the shared
+    aiohttp session.  No google-generativeai SDK is required — the API key is
+    passed as a query parameter per-request, so there is no global SDK state
+    and no threading lock needed.
 
-    Gemini natively handles multiple images in a single prompt — we pass them
-    all as inline_data parts followed by the text instruction.  This gives the
-    model full context to compare appearances across frames.
+    Safety filters are disabled via ``safetySettings`` because security camera
+    descriptions of people (clothing, build, actions, posture) can trigger
+    false positives on harassment and dangerous-content categories.  This is a
+    private security system, not user-facing content generation.
 
     Args:
-        images: List of raw JPEG bytes to analyse.
+        images: List of raw JPEG bytes to analyse.  All images are sent in a
+            single request as ``inline_data`` content parts.
         prompt: Text instruction for the model.
-        config: Full VoxWatch config dict.
+        config: Full VoxWatch config dict.  Reads ``config["ai"]["primary"]``
+            for ``api_key``, ``model``, and ``timeout_seconds``.
 
     Returns:
         Model response text.
 
     Raises:
-        Exception: If the Gemini API call fails (caller decides whether to fall back).
+        ValueError: On HTTP 400 (bad request / invalid key) or non-200 status,
+            empty candidate list, or empty response text.
+        aiohttp.ClientError: On network-level failures.
+        asyncio.TimeoutError: If the request exceeds ``timeout_seconds``.
     """
     primary_cfg = config["ai"]["primary"]
     api_key: str = primary_cfg["api_key"]
-    model_name: str = primary_cfg.get("model", "gemini-3.1-flash")
+    model_name: str = primary_cfg.get("model", "gemini-2.5-flash")
     timeout_seconds: int = primary_cfg.get("timeout_seconds", 5)
 
-    def _run_gemini_sync() -> str:
-        """Synchronous Gemini call — runs in a thread pool thread.
+    # Build multimodal content parts: text prompt first, then one inline_data
+    # entry per image.  Gemini accepts multiple images in a single request,
+    # giving the model cross-frame context for appearance comparison.
+    parts: list[dict] = [{"text": prompt}]
+    for idx, img_bytes in enumerate(images):
+        parts.append({
+            "inline_data": {
+                "mime_type": "image/jpeg",
+                "data": base64.b64encode(img_bytes).decode("ascii"),
+            }
+        })
+        logger.debug(
+            "Gemini images: added image %d/%d to request (%d bytes)",
+            idx + 1, len(images), len(img_bytes),
+        )
 
-        We import google.generativeai here (inside the thread) to avoid any
-        import-time side-effects on the event loop.
-
-        Thread safety: _GEMINI_LOCK is acquired around genai.configure() and
-        GenerativeModel() because genai.configure() writes to a module-level
-        global.  Two concurrent threads calling configure() with different keys
-        (unlikely here but defensive) could race and corrupt each other's
-        requests.  The entire call — configure, model creation, and
-        generate_content — runs under the lock so the SDK state is consistent
-        for the duration of the request.
-        """
-        import google.generativeai as genai  # type: ignore[import]
-
-        # Acquire the lock before touching any genai module-level state.
-        # The entire configure + model-create + generate_content sequence runs
-        # under the lock so no other thread can call configure() in between.
-        with _GEMINI_LOCK:
-            genai.configure(api_key=api_key)
-            model = genai.GenerativeModel(model_name)
-
-            # Disable Gemini safety filters — security camera descriptions of people
-            # (clothing, build, actions) can trigger false positives on harassment
-            # and dangerous-content filters.  This is a private security system,
-            # not user-facing content generation.
-            safety_settings = [
-                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-            ]
-
-            # Build the content parts: one inline_data entry per image, then the prompt.
-            # Gemini accepts JPEG bytes as base64-encoded inline_data with mime_type.
-            content_parts: list = []
-            for idx, img_bytes in enumerate(images):
-                # Pass images as inline_data dicts — this avoids writing temp files.
-                content_parts.append({
-                    "inline_data": {
-                        "mime_type": "image/jpeg",
-                        "data": base64.b64encode(img_bytes).decode("utf-8"),
-                    }
-                })
-                logger.debug("Added image %d/%d to Gemini request (%d bytes)",
-                             idx + 1, len(images), len(img_bytes))
-
-            # Append the text prompt after all images.
-            content_parts.append({"text": prompt})
-
-            response = model.generate_content(content_parts, safety_settings=safety_settings)
-            return response.text.strip()
-
-    # Run the synchronous Gemini call in a thread so the event loop stays free.
-    result = await asyncio.wait_for(
-        asyncio.to_thread(_run_gemini_sync),
-        timeout=timeout_seconds,
+    url = (
+        f"https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{model_name}:generateContent?key={api_key}"
     )
-    return result
+    payload = {
+        "contents": [{"parts": parts}],
+        # Disable all safety filters — security camera descriptions regularly
+        # trigger harassment / dangerous-content false positives without these.
+        "safetySettings": [
+            {"category": "HARM_CATEGORY_HARASSMENT",        "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_HATE_SPEECH",       "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+        ],
+        "generationConfig": {
+            "maxOutputTokens": 300,
+            "temperature": 0.3,
+        },
+    }
+
+    logger.debug(
+        "Calling Gemini REST API with model %r (%d image(s))",
+        model_name, len(images),
+    )
+
+    session = await _get_session()
+    async with session.post(
+        url, json=payload, timeout=aiohttp.ClientTimeout(total=timeout_seconds)
+    ) as resp:
+        if resp.status == 400:
+            body = await resp.json()
+            error = body.get("error", {}).get("message", "Unknown error")
+            raise ValueError(f"Gemini API error (400): {error}")
+        if resp.status != 200:
+            body_text = await resp.text()
+            raise ValueError(
+                f"Gemini API returned HTTP {resp.status}: {body_text[:200]}"
+            )
+        data = await resp.json()
+
+    # Extract the generated text from the response structure:
+    #   {"candidates": [{"content": {"parts": [{"text": "..."}]}}]}
+    candidates = data.get("candidates", [])
+    if not candidates:
+        raise ValueError("Gemini returned no candidates in response")
+
+    response_parts = candidates[0].get("content", {}).get("parts", [])
+    text = " ".join(p.get("text", "") for p in response_parts).strip()
+    if not text:
+        raise ValueError("Gemini returned an empty text response")
+
+    return text
 
 
 async def _call_gemini_video(
@@ -1265,117 +1264,212 @@ async def _call_gemini_video(
     prompt: str,
     config: dict,
 ) -> str:
-    """Upload an MP4 video to Google Gemini and analyse it.
+    """Upload an MP4 video to the Gemini Files API and analyse it via REST.
 
-    Gemini's Files API allows uploading a video file and then passing the file
-    reference to the model.  We write the video to a temporary file because the
-    SDK's upload_file() function expects a file path.  The temp file is cleaned
-    up automatically after the call.
+    The Gemini Files API requires a three-step flow:
 
-    Like ``_call_gemini_images``, this runs in a thread pool to avoid blocking
-    the asyncio event loop.
+    1. Upload the video bytes via a multipart POST to the upload endpoint.
+       The response contains a ``file.name`` (e.g. ``"files/abc123"``).
+    2. Poll the file metadata endpoint until ``state`` becomes ``"ACTIVE"``.
+       Gemini typically processes a short security-camera clip in 2–5 seconds.
+    3. Call ``generateContent`` referencing the uploaded file via its URI.
+    4. Delete the uploaded file to avoid accumulating storage on the account.
+
+    All network calls use the shared aiohttp session and pass the API key as a
+    query parameter — no google-generativeai SDK required.
+
+    Safety filters are disabled for the same reason as ``_call_gemini_images``:
+    security camera footage of people in motion regularly triggers false
+    positives on harassment and dangerous-content categories.
 
     Args:
-        video_bytes: Raw MP4 bytes.
-        prompt: Text instruction for the model.
-        config: Full VoxWatch config dict.
+        video_bytes: Raw MP4 bytes from ``grab_video_clip``.
+        prompt: Text instruction for the model (e.g. STAGE3_PROMPT).
+        config: Full VoxWatch config dict.  Reads ``config["ai"]["primary"]``
+            for ``api_key``, ``model``, and ``timeout_seconds``.
 
     Returns:
         Model response text.
 
     Raises:
-        Exception: If the Gemini API call fails.
+        ValueError: On non-200 HTTP responses, upload failure, processing
+            timeout, empty candidate list, or empty response text.
+        aiohttp.ClientError: On network-level failures.
+        asyncio.TimeoutError: If the overall operation exceeds the timeout.
     """
     primary_cfg = config["ai"]["primary"]
     api_key: str = primary_cfg["api_key"]
-    model_name: str = primary_cfg.get("model", "gemini-3.1-flash")
-    # Video analysis takes longer than image analysis — use a more generous timeout.
+    model_name: str = primary_cfg.get("model", "gemini-2.5-flash")
+    # Video analysis takes longer than image analysis — triple the base timeout
+    # to allow for upload time + Gemini processing latency.
     timeout_seconds: int = primary_cfg.get("timeout_seconds", 5) * 3
 
-    def _run_gemini_video_sync() -> str:
-        """Synchronous Gemini video analysis — runs in a thread pool thread.
+    session = await _get_session()
 
-        Thread safety: _GEMINI_LOCK is acquired around genai.configure() and
-        GenerativeModel() (and the entire API interaction) for the same reason
-        as in _run_gemini_sync — genai.configure() sets module-level state and
-        is not thread-safe.  The temp-file cleanup in the finally block runs
-        outside the lock because it only touches the local filesystem.
-        """
-        import google.generativeai as genai  # type: ignore[import]
-
-        # Write video bytes to a named temp file so genai.upload_file() can read it.
-        # delete=False is necessary on Windows where temp files can't be re-opened
-        # while open; we manually delete after upload.
-        # Temp file creation happens outside the lock — it is purely local I/O
-        # and does not interact with the genai module state.
-        tmp_path: Optional[str] = None
-        try:
-            with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
-                tmp.write(video_bytes)
-                tmp_path = tmp.name
-
-            logger.debug("Uploading %d-byte video to Gemini Files API", len(video_bytes))
-
-            # Acquire the lock before touching any genai module-level state.
-            # The entire configure + model-create + upload + generate sequence
-            # runs under the lock so no other thread can call configure() in between.
-            with _GEMINI_LOCK:
-                genai.configure(api_key=api_key)
-                model = genai.GenerativeModel(model_name)
-
-                # Upload the video to Gemini's Files API.  This returns a File object
-                # that we reference in the model prompt.
-                video_file = genai.upload_file(tmp_path, mime_type="video/mp4")
-
-                # Wait for Gemini to process the video — it transitions from PROCESSING
-                # to ACTIVE.  We poll with a short sleep; typical processing is 2-5s.
-                import time
-                for _ in range(30):  # Max 30 iterations × 1s = 30s
-                    if video_file.state.name == "ACTIVE":
-                        break
-                    time.sleep(1)
-                    video_file = genai.get_file(video_file.name)
-                else:
-                    raise TimeoutError(
-                        f"Gemini video file {video_file.name!r} did not become ACTIVE in time"
-                    )
-
-                # Disable safety filters — same rationale as _call_gemini_images.
-                safety_settings = [
-                    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-                ]
-
-                response = model.generate_content(
-                    [video_file, prompt], safety_settings=safety_settings
-                )
-
-                # Clean up the uploaded file from Gemini's storage to avoid accumulating
-                # files on the account (Gemini Files API has storage limits).
-                try:
-                    genai.delete_file(video_file.name)
-                except Exception as cleanup_exc:
-                    logger.debug("Could not delete Gemini file %s: %s",
-                                 video_file.name, cleanup_exc)
-
-                return response.text.strip()
-
-        finally:
-            # Always remove the local temp file.  This runs outside the lock
-            # because it does not touch genai module state.
-            if tmp_path and os.path.exists(tmp_path):
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
-
-    result = await asyncio.wait_for(
-        asyncio.to_thread(_run_gemini_video_sync),
-        timeout=timeout_seconds,
+    # ── Step 1: Upload the video to the Gemini Files API ──────────────────────
+    # The upload endpoint accepts a multipart POST with the video bytes.
+    # The Content-Type header must declare the MIME type of the file being
+    # uploaded so Gemini can identify it as a video for processing.
+    logger.debug(
+        "Uploading %d-byte video to Gemini Files API (model=%r)",
+        len(video_bytes), model_name,
     )
-    return result
+
+    upload_url = (
+        f"https://generativelanguage.googleapis.com/upload/v1beta/files"
+        f"?key={api_key}"
+    )
+
+    # Build a minimal multipart body with the video bytes.
+    # FormData handles the boundary encoding automatically.
+    upload_data = aiohttp.FormData()
+    upload_data.add_field(
+        name="file",
+        value=video_bytes,
+        content_type="video/mp4",
+        filename="clip.mp4",
+    )
+
+    http_timeout = aiohttp.ClientTimeout(total=timeout_seconds)
+
+    async with session.post(upload_url, data=upload_data, timeout=http_timeout) as resp:
+        if resp.status != 200:
+            body_text = await resp.text()
+            raise ValueError(
+                f"Gemini Files API upload returned HTTP {resp.status}: "
+                f"{body_text[:200]}"
+            )
+        upload_data_resp = await resp.json()
+
+    # The upload response nests the file metadata under the "file" key.
+    file_meta: dict = upload_data_resp.get("file", {})
+    file_name: str = file_meta.get("name", "")
+    file_uri: str = file_meta.get("uri", "")
+
+    if not file_name or not file_uri:
+        raise ValueError(
+            f"Gemini Files API upload response missing file name or URI: "
+            f"{upload_data_resp}"
+        )
+
+    logger.debug("Gemini file uploaded: name=%r uri=%r", file_name, file_uri)
+
+    # ── Step 2: Poll until the file state becomes ACTIVE ──────────────────────
+    # Gemini processes the video asynchronously.  The file transitions from
+    # PROCESSING → ACTIVE once Gemini has ingested it.  We poll the metadata
+    # endpoint with a 1-second sleep between checks; typical processing time
+    # for a short clip is 2–5 seconds.
+    status_url = (
+        f"https://generativelanguage.googleapis.com/v1beta/{file_name}"
+        f"?key={api_key}"
+    )
+    poll_timeout = aiohttp.ClientTimeout(total=10)
+
+    for attempt in range(30):  # Max 30 × 1 s = 30 s
+        async with session.get(status_url, timeout=poll_timeout) as resp:
+            if resp.status != 200:
+                body_text = await resp.text()
+                raise ValueError(
+                    f"Gemini file status check returned HTTP {resp.status}: "
+                    f"{body_text[:200]}"
+                )
+            status_data = await resp.json()
+
+        state: str = status_data.get("state", "")
+        if state == "ACTIVE":
+            logger.debug(
+                "Gemini file %r is ACTIVE after %d poll(s)", file_name, attempt + 1
+            )
+            break
+        if state == "FAILED":
+            raise ValueError(
+                f"Gemini file {file_name!r} processing failed (state=FAILED)"
+            )
+        # Still PROCESSING — wait 1 second before the next poll.
+        await asyncio.sleep(1)
+    else:
+        raise TimeoutError(
+            f"Gemini file {file_name!r} did not become ACTIVE within 30 seconds"
+        )
+
+    # ── Step 3: Call generateContent with the uploaded file reference ─────────
+    generate_url = (
+        f"https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{model_name}:generateContent?key={api_key}"
+    )
+    generate_payload = {
+        "contents": [{
+            "parts": [
+                # Reference the uploaded file by its URI.
+                {"file_data": {"mime_type": "video/mp4", "file_uri": file_uri}},
+                {"text": prompt},
+            ]
+        }],
+        # Disable safety filters — same rationale as _call_gemini_images.
+        "safetySettings": [
+            {"category": "HARM_CATEGORY_HARASSMENT",        "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_HATE_SPEECH",       "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+        ],
+        "generationConfig": {
+            "maxOutputTokens": 300,
+            "temperature": 0.3,
+        },
+    }
+
+    logger.debug("Calling Gemini generateContent for video file %r", file_name)
+
+    async with session.post(
+        generate_url, json=generate_payload, timeout=http_timeout
+    ) as resp:
+        if resp.status == 400:
+            body = await resp.json()
+            error = body.get("error", {}).get("message", "Unknown error")
+            raise ValueError(f"Gemini generateContent error (400): {error}")
+        if resp.status != 200:
+            body_text = await resp.text()
+            raise ValueError(
+                f"Gemini generateContent returned HTTP {resp.status}: "
+                f"{body_text[:200]}"
+            )
+        gen_data = await resp.json()
+
+    # ── Step 4: Delete the uploaded file to free Gemini storage ──────────────
+    # Gemini's Files API has a per-account storage limit.  Always clean up
+    # after a successful (or failed) generateContent call.
+    delete_url = (
+        f"https://generativelanguage.googleapis.com/v1beta/{file_name}"
+        f"?key={api_key}"
+    )
+    try:
+        async with session.delete(
+            delete_url, timeout=aiohttp.ClientTimeout(total=5)
+        ) as del_resp:
+            if del_resp.status not in (200, 204):
+                logger.debug(
+                    "Gemini file delete returned HTTP %d for %r",
+                    del_resp.status, file_name,
+                )
+            else:
+                logger.debug("Gemini file %r deleted", file_name)
+    except Exception as cleanup_exc:
+        # Non-fatal — log and continue.
+        logger.debug(
+            "Could not delete Gemini file %r: %s", file_name, cleanup_exc
+        )
+
+    # ── Extract and return the response text ──────────────────────────────────
+    candidates = gen_data.get("candidates", [])
+    if not candidates:
+        raise ValueError("Gemini video analysis returned no candidates")
+
+    response_parts = candidates[0].get("content", {}).get("parts", [])
+    text = " ".join(p.get("text", "") for p in response_parts).strip()
+    if not text:
+        raise ValueError("Gemini video analysis returned an empty text response")
+
+    return text
 
 
 # ---------------------------------------------------------------------------

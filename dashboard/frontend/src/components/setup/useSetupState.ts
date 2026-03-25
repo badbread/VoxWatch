@@ -152,7 +152,7 @@ const initialState: SetupState = {
   isProbing: false,
 
   aiProvider: 'gemini',
-  aiModel: 'gemini-3.1-flash',
+  aiModel: 'gemini-2.5-flash',
   aiApiKey: '',
   aiHost: '',
 
