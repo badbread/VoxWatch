@@ -484,6 +484,60 @@ class DispatchConfig(BaseModel):
             "configured address, even if address is filled in."
         ),
     )
+    # ── Officer & Voice Settings ──
+    officer_response: bool = Field(
+        default=True,
+        description="Enable officer acknowledgment after dispatch call.",
+    )
+    officer_callsign: str = Field(
+        default="",
+        description="Officer unit callsign (e.g. 'Baker Forty-one'). Falls back to callsign if empty.",
+    )
+    officer_voice: str = Field(
+        default="am_fenrir",
+        description="Kokoro voice for the officer (deep male).",
+    )
+    officer_openai_voice: str = Field(
+        default="onyx",
+        description="OpenAI voice for officer role.",
+    )
+    officer_elevenlabs_voice: str = Field(
+        default="",
+        description="ElevenLabs voice ID for officer role.",
+    )
+    officer_speed: float = Field(
+        default=1.0,
+        description="Officer voice speed multiplier.",
+    )
+    dispatcher_voice: str = Field(
+        default="af_bella",
+        description="Kokoro voice for the dispatcher (measured female).",
+    )
+    dispatcher_speed: float = Field(
+        default=0.9,
+        description="Dispatcher voice speed (slightly slower for measured cadence).",
+    )
+    dispatcher_openai_voice: str = Field(
+        default="nova",
+        description="OpenAI voice for dispatcher role.",
+    )
+    dispatcher_elevenlabs_voice: str = Field(
+        default="",
+        description="ElevenLabs voice ID for dispatcher role.",
+    )
+    # ── Channel Intro Settings ──
+    channel_intro: bool = Field(
+        default=True,
+        description="Play 'Connecting to dispatch frequency' intro before the call.",
+    )
+    intro_audio: str = Field(
+        default="",
+        description="Path to custom intro WAV/MP3. Overrides auto-generated intro.",
+    )
+    intro_text: str = Field(
+        default="Connecting to {agency} dispatch frequency.",
+        description="Template text for auto-generated intro. Supports {agency} token.",
+    )
 
 
 class PersonaConfig(BaseModel):

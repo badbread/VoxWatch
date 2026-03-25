@@ -132,9 +132,8 @@ def _require_api_key(
     )
     if not token_matches:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
+            status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid API key.",
-            headers={"WWW-Authenticate": "Bearer"},
         )
 
 
