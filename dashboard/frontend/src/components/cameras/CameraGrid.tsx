@@ -47,8 +47,8 @@ export function CameraGrid({ onSelect, selectedName }: CameraGridProps) {
     return (
       <EmptyState
         icon={<Camera className="h-8 w-8 text-gray-400" />}
-        title="No cameras configured"
-        description="Add cameras in the Configuration page."
+        title="No cameras found"
+        description="No cameras are configured in Frigate yet. Once Frigate reports cameras, they will appear here."
       />
     );
   }

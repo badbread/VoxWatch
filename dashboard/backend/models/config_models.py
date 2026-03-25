@@ -190,7 +190,7 @@ class AiProviderConfig(BaseModel):
         description="Provider identifier — e.g. 'gemini', 'openai', 'anthropic', 'ollama', 'custom'",
     )
     model: str = Field(
-        default="gemini-2.0-flash",
+        default="gemini-3.1-flash",
         description="Model name or identifier (provider-specific string)",
     )
     api_key: Optional[str] = Field(

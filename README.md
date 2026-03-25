@@ -209,7 +209,7 @@ Automatic fallback to secondary provider if primary fails. Degrades gracefully.
 ai:
   primary:
     provider: "gemini"
-    model: "gemini-2.0-flash"
+    model: "gemini-3.1-flash"
     api_key: "${GEMINI_API_KEY}"
     timeout_seconds: 5
   fallback:
@@ -415,7 +415,7 @@ conditions:
 ai:
   primary:
     provider: "gemini"
-    model: "gemini-2.0-flash"
+    model: "gemini-3.1-flash"
     api_key: "${GEMINI_API_KEY}"
   fallback:
     provider: "ollama"

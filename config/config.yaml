@@ -68,7 +68,7 @@ ai:
   # Primary: Google Gemini Flash (fast cloud API, supports video)
   primary:
     provider: "gemini"
-    model: "gemini-2.0-flash"
+    model: "gemini-3.1-flash"
     api_key: "${GEMINI_API_KEY}"   # Set via environment variable
     timeout_seconds: 5
   # Fallback: Local Ollama with LLaVA (no cloud dependency)

@@ -11,11 +11,11 @@
  * Zero means free (local inference). Null means unknown/unlisted.
  */
 export const COST_MAP: Record<string, number> = {
-  'gemini:gemini-2.0-flash': 0.001,
-  'gemini:gemini-2.0-flash-lite': 0.0003,
-  'gemini:gemini-1.5-flash': 0.0008,
-  'gemini:gemini-1.5-pro': 0.01,
-  'gemini:gemini-2.5-pro': 0.015,
+  'gemini:gemini-3.1-flash': 0.001,
+  'gemini:gemini-3.1-flash-lite': 0.0003,
+  'gemini:gemini-3.1-pro': 0.01,
+  'gemini:gemini-2.5-flash': 0.001,
+  'gemini:gemini-2.5-pro': 0.008,
   'openai:gpt-4o-mini': 0.002,
   'openai:gpt-4o': 0.012,
   'openai:gpt-4-turbo': 0.025,

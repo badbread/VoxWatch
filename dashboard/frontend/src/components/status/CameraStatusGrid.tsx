@@ -41,7 +41,7 @@ export function CameraStatusGrid({ onCameraClick, selectedName }: CameraStatusGr
       <EmptyState
         icon={<Camera className="h-8 w-8 text-gray-400" />}
         title="No cameras configured"
-        description="Add cameras in the Configuration page to start monitoring."
+        description="Go to the Cameras page to add cameras to VoxWatch."
       />
     );
   }

@@ -1,17 +1,18 @@
 /**
  * MobileNav — bottom tab bar shown on mobile (<768px).
  *
- * Provides the same five navigation destinations as the sidebar, but laid out
- * as a compact icon + label tab strip fixed to the bottom of the viewport.
+ * Provides the four primary navigation destinations as a compact icon + label
+ * tab strip fixed to the bottom of the viewport. The Setup Wizard is accessible
+ * via the sidebar on tablet/desktop or from the Dashboard page on mobile.
  * Hidden on tablet and desktop where the sidebar is visible.
  */
 
 import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard,
+  Camera,
   Settings,
-  Volume2,
-  Wand2,
+  FlaskConical,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 
@@ -21,11 +22,16 @@ interface TabItem {
   icon: React.ElementType;
 }
 
+/**
+ * The four primary tab destinations shown on mobile.
+ * Setup Wizard is omitted here — it is available from the Dashboard quick-links
+ * or via the sidebar on tablet+ screens.
+ */
 const TABS: TabItem[] = [
-  { label: 'Dashboard', to: '/', icon: LayoutDashboard },
-  { label: 'Setup', to: '/wizard', icon: Wand2 },
-  { label: 'Config', to: '/config', icon: Settings },
-  { label: 'Audio Test', to: '/audio', icon: Volume2 },
+  { label: 'Dashboard', to: '/',        icon: LayoutDashboard },
+  { label: 'Cameras',   to: '/cameras', icon: Camera },
+  { label: 'Config',    to: '/config',  icon: Settings },
+  { label: 'Tests',     to: '/tests',   icon: FlaskConical },
 ];
 
 /**

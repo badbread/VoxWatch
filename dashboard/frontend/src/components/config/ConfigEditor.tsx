@@ -11,7 +11,6 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   Server,
   Radio,
-  Camera,
   Clock,
   Brain,
   Layers,
@@ -27,7 +26,7 @@ import { ErrorBoundary } from '@/components/common/ErrorBoundary';
 import { ConfigSaveBar } from './ConfigSaveBar';
 import { FrigateConfigForm } from './FrigateConfigForm';
 import { Go2rtcConfigForm } from './Go2rtcConfigForm';
-import { CamerasConfigForm } from './CamerasConfigForm';
+// CamerasConfigForm removed — camera config now lives on the Cameras page (/cameras)
 import { ConditionsConfigForm } from './ConditionsConfigForm';
 import { AiConfigForm } from './AiConfigForm';
 import { StagesConfigForm } from './StagesConfigForm';
@@ -46,9 +45,10 @@ interface TabDef {
   section: keyof VoxWatchConfig | 'stages' | 'audio_combined' | 'response_mode';
 }
 
+// Note: the Cameras tab has been removed — camera management now lives on the
+// Cameras page (/cameras) where users can add, edit, and remove cameras inline.
 const TABS: TabDef[] = [
   { id: 'services', label: 'Services', icon: Server, section: 'frigate' },
-  { id: 'cameras', label: 'Cameras', icon: Camera, section: 'cameras' },
   { id: 'detection', label: 'Mode', icon: Clock, section: 'conditions' },
   { id: 'ai', label: 'AI Provider', icon: Brain, section: 'ai' },
   { id: 'pipeline', label: 'Pipeline', icon: Layers, section: 'stages' },
@@ -65,7 +65,7 @@ export function ConfigEditor() {
 
   const [localConfig, setLocalConfig] = useState<VoxWatchConfig | null>(null);
 
-  // Support ?tab=cameras query param for deep linking (e.g. from "Add to VoxWatch" button)
+  // Support ?tab={id} query param for deep linking to a specific section
   const searchParams = new URLSearchParams(window.location.search);
   const initialTab = TABS.find((t) => t.id === searchParams.get('tab'))?.id ?? TABS[0]!.id;
   const [activeTab, setActiveTab] = useState(initialTab);
@@ -187,13 +187,6 @@ export function ConfigEditor() {
                     />
                   </div>
                 </div>
-              )}
-              {activeTab === 'cameras' && (
-                <CamerasConfigForm
-                  value={localConfig.cameras}
-                  onChange={(cameras) => handleChange({ cameras })}
-                  errors={validationResult.errors}
-                />
               )}
               {activeTab === 'detection' && (
                 <ConditionsConfigForm
