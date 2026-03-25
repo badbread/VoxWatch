@@ -1,18 +1,27 @@
 /**
- * cameraReport.ts — Utility for building pre-filled GitHub issue URLs for
- * camera compatibility reports.
+ * cameraReport.ts — Utilities for building pre-filled camera compatibility
+ * report URLs for both GitHub issues and email (mailto:).
  *
- * The GitHub issue form field `id` values in camera_report.yml map directly
- * to query parameters supported by GitHub's new-issue URL scheme. This
- * utility assembles those parameters from the data VoxWatch has already
- * collected during camera identification and audio testing.
+ * GitHub issue URL:
+ *   The form field `id` values in camera_report.yml map directly to query
+ *   parameters supported by GitHub's new-issue URL scheme. This utility
+ *   assembles those parameters from the data VoxWatch has already collected
+ *   during camera identification and audio testing.
  *
- * GitHub pre-fill reference:
- *   https://docs.github.com/en/issues/tracking-your-work-with-issues/creating-an-issue#creating-an-issue-from-a-url-query
+ *   GitHub pre-fill reference:
+ *     https://docs.github.com/en/issues/tracking-your-work-with-issues/creating-an-issue#creating-an-issue-from-a-url-query
+ *
+ * Email (mailto:):
+ *   buildCameraReportEmailUrl() produces a mailto: URL with a pre-filled
+ *   subject and plain-text body containing the same auto-detected fields,
+ *   formatted as readable prose rather than YAML.
  */
 
 /** Repository where camera reports should be filed. */
 const REPO_URL = 'https://github.com/badbread/VoxWatch';
+
+/** Email address that receives camera compatibility reports. */
+const REPORT_EMAIL = 'jason@voxwatch.com';
 
 /** Maps the audioResult prop value to the matching dropdown label in camera_report.yml. */
 const AUDIO_RESULT_LABELS: Record<string, string> = {
@@ -167,4 +176,115 @@ export function buildCameraReportUrl(params: CameraReportParams): string {
   if (notes) searchParams.set('notes', notes);
 
   return `${REPO_URL}/issues/new?${searchParams.toString()}`;
+}
+
+/**
+ * Human-readable labels for the audio result used in the email body.
+ * Kept separate from AUDIO_RESULT_LABELS so the GitHub dropdown wording
+ * and the email prose can diverge independently.
+ */
+const EMAIL_AUDIO_RESULT_LABELS: Record<string, string> = {
+  success: 'Worked — heard audio clearly',
+  garbled: 'Worked — but audio was garbled/distorted',
+  partial: 'Partially — intermittent/unreliable',
+  failed: 'Failed — no audio at all',
+};
+
+/**
+ * Human-readable speaker type labels for the email body.
+ *
+ * Mirrors SPEAKER_TYPE_LABELS but uses shorter prose suitable for a one-liner
+ * in the email rather than a dropdown option string.
+ */
+const EMAIL_SPEAKER_TYPE_LABELS: Record<string, string> = {
+  built_in: 'Built-in',
+  rca_out: 'RCA audio out (external speaker required)',
+  none: 'None',
+  unknown: 'Unknown',
+  override: 'Built-in (manual override)',
+  'not sure': 'Unknown',
+};
+
+/**
+ * Builds a mailto: URL that opens the user's email client with a pre-filled
+ * camera compatibility report.
+ *
+ * The body is formatted as plain text (not YAML) because it will be read by
+ * a human in an email client, not parsed by a form. All fields are optional;
+ * missing values are omitted from the body rather than shown as "undefined".
+ *
+ * @param params - The same CameraReportParams used by buildCameraReportUrl.
+ * @returns A mailto: URL string suitable for use as an anchor href or
+ *   window.open() target.
+ */
+export function buildCameraReportEmailUrl(params: CameraReportParams): string {
+  const {
+    manufacturer = '',
+    model = '',
+    firmware,
+    ip,
+    backchannelCodecs,
+    hasBackchannel,
+    audioResult,
+    speakerType,
+    frigateVersion,
+    go2rtcVersion,
+    voxwatchVersion,
+  } = params;
+
+  const mfr = manufacturer || 'Unknown';
+  const mdl = model || 'Unknown';
+
+  // Subject line mirrors the GitHub issue title so reports are easy to triage.
+  const subject = `Camera Report: ${mfr} ${mdl}`;
+
+  // Build body lines, skipping any field we have no data for.
+  const bodyLines: string[] = [
+    'Camera Compatibility Report',
+    '',
+    `Manufacturer: ${mfr}`,
+    `Model: ${mdl}`,
+  ];
+
+  if (firmware) bodyLines.push(`Firmware: ${firmware}`);
+
+  const audioLabel = audioResult
+    ? (EMAIL_AUDIO_RESULT_LABELS[audioResult] ?? audioResult)
+    : 'Did not test';
+  bodyLines.push(`Audio Result: ${audioLabel}`);
+
+  if (speakerType) {
+    const speakerLabel = EMAIL_SPEAKER_TYPE_LABELS[speakerType] ?? speakerType;
+    bodyLines.push(`Speaker Type: ${speakerLabel}`);
+  }
+
+  // Backchannel section — only add the codecs line when we have data.
+  if (hasBackchannel === false) {
+    bodyLines.push('Backchannel: Not detected by go2rtc');
+  } else if (backchannelCodecs && backchannelCodecs.length > 0) {
+    bodyLines.push(`Backchannel Codecs: ${backchannelCodecs.join(', ')}`);
+  } else if (hasBackchannel === true) {
+    bodyLines.push('Backchannel: Detected (codec unknown)');
+  }
+
+  if (ip) bodyLines.push(`Camera IP: ${ip}`);
+
+  // System info block — only rendered when at least one version is known.
+  const hasSystemInfo = voxwatchVersion || frigateVersion || go2rtcVersion;
+  if (hasSystemInfo) {
+    bodyLines.push('', 'System Info:');
+    if (voxwatchVersion) bodyLines.push(`VoxWatch: ${voxwatchVersion}`);
+    if (frigateVersion) bodyLines.push(`Frigate: ${frigateVersion}`);
+    if (go2rtcVersion) bodyLines.push(`go2rtc: ${go2rtcVersion}`);
+  }
+
+  const body = bodyLines.join('\n');
+
+  // Use encodeURIComponent for the subject and body so special characters
+  // (colons, slashes, square brackets in codec strings) survive the URL.
+  return (
+    `mailto:${REPORT_EMAIL}` +
+    `?subject=${encodeURIComponent(subject)}` +
+    `&body=${encodeURIComponent(body)}`
+  );
 }

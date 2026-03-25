@@ -22,12 +22,12 @@ Prerequisites:
 
 Usage:
     # Simplest run — uses default camera and a random test image
-    python tests/test_mqtt_simulation.py --mqtt-host 10.1.10.24
+    python tests/test_mqtt_simulation.py --mqtt-host <your-mqtt-host>
 
     # Named scenario with score override
     python tests/test_mqtt_simulation.py \\
         --scenario car_thief_night \\
-        --mqtt-host 10.1.10.24 \\
+        --mqtt-host <your-mqtt-host> \\
         --mqtt-port 1883 \\
         --frigate-port 5123 \\
         --score 0.95
@@ -35,7 +35,7 @@ Usage:
     # Use --redirect to have the script patch config.yaml temporarily
     python tests/test_mqtt_simulation.py \\
         --scenario porch_pirate_day \\
-        --mqtt-host 10.1.10.24 \\
+        --mqtt-host <your-mqtt-host> \\
         --redirect \\
         --config /config/config.yaml
 
@@ -621,7 +621,7 @@ def get_local_ip() -> str:
     the local address the OS selected for that route.
 
     Returns:
-        LAN IP address string, e.g. ``"10.1.10.5"``.  Falls back to
+        LAN IP address string, e.g. ``"192.168.1.100"``.  Falls back to
         ``"127.0.0.1"`` on any error (Docker containers can't reach loopback,
         so the caller should warn the user).
     """
@@ -864,9 +864,9 @@ def parse_args() -> argparse.Namespace:
             "  porch_pirate_day  — day_porch_pirate.jpg (color, person at package)\n"
             "\n"
             "Examples:\n"
-            "  python tests/test_mqtt_simulation.py --mqtt-host 10.1.10.24\n"
+            "  python tests/test_mqtt_simulation.py --mqtt-host <your-mqtt-host>\n"
             "  python tests/test_mqtt_simulation.py --scenario prowler_night "
-            "--mqtt-host 10.1.10.24 --score 0.97\n"
+            "--mqtt-host <your-mqtt-host> --score 0.97\n"
         ),
     )
 
