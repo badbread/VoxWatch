@@ -1,59 +1,68 @@
 # VoxWatch Docker Compose
 #
 # Quick Start:
-#   1. Set FRIGATE_HOST to your Frigate server IP below
+#   1. Change YOUR_FRIGATE_IP below to your Frigate server's IP address
 #   2. docker compose up -d
-#   3. Open http://your-host:33344 — the setup wizard will guide you
+#   3. Open http://your-host:33344 — the setup wizard will guide you through everything
+#
+# That's it. The setup wizard handles Frigate discovery, MQTT, AI providers,
+# TTS voice selection, response mode, and camera configuration.
 #
 # The dashboard (voxwatch-dashboard) is OPTIONAL after initial setup.
 # VoxWatch runs independently using config.yaml. Stop the dashboard
-# container to save resources — your deterrent system keeps working.
-
-# version key removed — deprecated in modern Docker Compose
+# to save resources — your deterrent system keeps working.
 
 services:
+  # ── Core Service ────────────────────────────────────────────────────────
+  # Listens for Frigate person detections via MQTT, runs AI analysis,
+  # generates TTS audio, and pushes to camera speakers via go2rtc.
   voxwatch:
     container_name: voxwatch
     image: voxwatch:latest
     restart: unless-stopped
-
-    # Host networking so we can reach go2rtc at localhost:1984
-    # and Frigate at localhost:5000, MQTT at localhost:1883
-    # (all run on the same Docker LXC host)
     network_mode: host
-
-    # Resource limits — VoxWatch is lightweight, TTS is the heaviest operation
+    environment:
+      - "FRIGATE_HOST=YOUR_FRIGATE_IP"
+      - "TZ=America/Los_Angeles"    # Change to your timezone
+      - "PYTHONUNBUFFERED=1"
+      # Optional: set API keys here instead of in the dashboard
+      # - "GEMINI_API_KEY=your-key"
+      # - "OPENAI_API_KEY=your-key"
+      # - "ELEVENLABS_API_KEY=your-key"
+    volumes:
+      - ./config:/config
+      - ./data:/data
     mem_limit: 512m
-    memswap_limit: 512m
     cpus: 2.0
-
-    # Docker log rotation — prevents container logs from filling the disk.
-    # Docker stores stdout/stderr in JSON files under /var/lib/docker/containers/.
-    # Without limits these grow unbounded. 10 MB x 3 files = 30 MB max per container.
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
 
+  # ── Dashboard (optional after setup) ────────────────────────────────────
+  # Web UI for configuration, monitoring, and testing.
+  # First run: auto-redirects to setup wizard.
+  # After setup: provides config editor, camera management, audio tests.
+  # Safe to stop after configuration is complete.
+  voxwatch-dashboard:
+    container_name: voxwatch-dashboard
+    image: voxwatch-dashboard:latest
+    restart: unless-stopped
+    network_mode: host
     environment:
-      # API keys can be entered directly in the web dashboard (recommended)
-      # OR set here as env vars and use ${VAR_NAME} syntax in config.yaml.
-      # Uncomment only if you prefer the env var approach:
-      # - "GEMINI_API_KEY=your-key-here"
-      # - "OPENAI_API_KEY=your-key-here"
-      # - "ELEVENLABS_API_KEY=your-key-here"
-      # - "DASHBOARD_API_KEY=your-token-here"
-
-      # Python settings
-      - "PYTHONDONTWRITEBYTECODE=1"
-      - "PYTHONUNBUFFERED=1"
+      - "FRIGATE_HOST=YOUR_FRIGATE_IP"    # Same IP as above
+      - "DASHBOARD_PORT=33344"
       - "TZ=America/Los_Angeles"
-
+      # Optional: protect the dashboard with an API key
+      # - "DASHBOARD_API_KEY=your-secret-token"
     volumes:
-      # Config file — mount your customized config.yaml
-      # Adjust the left side to your host path
       - ./config:/config
-
-      # Persistent data (audio cache, logs)
-      - ./data:/data
+      - ./data:/data:ro
+    mem_limit: 256m
+    cpus: 1.0
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
