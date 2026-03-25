@@ -27,9 +27,9 @@
  */
 
 import { useState } from 'react';
-import { ExternalLink, Heart, AlertTriangle, X } from 'lucide-react';
+import { ExternalLink, Heart, AlertTriangle, X, Mail } from 'lucide-react';
 import { cn } from '@/utils/cn';
-import { buildCameraReportUrl } from '@/utils/cameraReport';
+import { buildCameraReportUrl, buildCameraReportEmailUrl } from '@/utils/cameraReport';
 
 /** VoxWatch dashboard version — hardcoded here, matches pyproject.toml. */
 const VOXWATCH_VERSION = '1.0.0';
@@ -70,7 +70,10 @@ function resolveVariant(result: CameraReportPromptProps['audioResult']): {
   iconCls: string;
   headingCls: string;
   bodyCls: string;
+  /** Primary (GitHub) button Tailwind classes. */
   buttonCls: string;
+  /** Outline (email) button Tailwind classes — uses the same accent colour. */
+  emailButtonCls: string;
   icon: React.ElementType;
   heading: string;
   body: string;
@@ -84,6 +87,8 @@ function resolveVariant(result: CameraReportPromptProps['audioResult']): {
       bodyCls: 'text-green-700 dark:text-green-400',
       buttonCls:
         'bg-green-600 hover:bg-green-700 focus:ring-green-500 text-white',
+      emailButtonCls:
+        'border border-green-600 text-green-700 hover:bg-green-100 focus:ring-green-500 dark:border-green-500 dark:text-green-400 dark:hover:bg-green-900/30',
       icon: Heart,
       heading: 'This camera works! Help the community.',
       body: 'You just confirmed audio on an undocumented camera. Share your results so other VoxWatch users with the same hardware know it works.',
@@ -98,6 +103,8 @@ function resolveVariant(result: CameraReportPromptProps['audioResult']): {
     bodyCls: 'text-amber-700 dark:text-amber-400',
     buttonCls:
       'bg-amber-500 hover:bg-amber-600 focus:ring-amber-400 text-white',
+    emailButtonCls:
+      'border border-amber-500 text-amber-700 hover:bg-amber-100 focus:ring-amber-400 dark:border-amber-400 dark:text-amber-400 dark:hover:bg-amber-900/30',
     icon: AlertTriangle,
     heading: 'Audio did not work — your report helps.',
     body: 'Unknown cameras need real-world data to improve compatibility. Filing a report takes 30 seconds and helps the next person avoid hours of debugging.',
@@ -129,7 +136,8 @@ export function CameraReportPrompt({
   const variant = resolveVariant(audioResult);
   const Icon = variant.icon;
 
-  const reportUrl = buildCameraReportUrl({
+  /** Shared params object so both URL builders receive identical data. */
+  const reportParams = {
     manufacturer,
     model,
     firmware,
@@ -140,7 +148,10 @@ export function CameraReportPrompt({
     frigateVersion,
     go2rtcVersion,
     voxwatchVersion: VOXWATCH_VERSION,
-  });
+  };
+
+  const reportUrl = buildCameraReportUrl(reportParams);
+  const emailUrl = buildCameraReportEmailUrl(reportParams);
 
   /** Handle dismiss — call optional parent callback and hide the prompt. */
   const handleDismiss = () => {
@@ -201,7 +212,7 @@ export function CameraReportPrompt({
           )}
 
           {/* Actions */}
-          <div className="flex flex-wrap items-center gap-3 pt-1">
+          <div className="flex flex-wrap items-center gap-2 pt-1">
             {/* Primary CTA — opens pre-filled GitHub issue */}
             <a
               href={reportUrl}
@@ -214,10 +225,25 @@ export function CameraReportPrompt({
               )}
             >
               <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-              Report Results
+              Report on GitHub
             </a>
 
-            {/* Secondary — dismiss link, visually subdued */}
+            {/* Secondary CTA — opens mailto: link in a new window */}
+            <a
+              href={emailUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold',
+                'bg-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1',
+                variant.emailButtonCls,
+              )}
+            >
+              <Mail className="h-3.5 w-3.5" aria-hidden="true" />
+              Email Report
+            </a>
+
+            {/* Tertiary — dismiss link, visually subdued */}
             <button
               type="button"
               onClick={handleDismiss}
