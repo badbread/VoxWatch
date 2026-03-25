@@ -298,6 +298,83 @@ response_mode:
                                              # Default when blank: ErXwobaYiN019PkySvjV (Antoni).
     officer_speed: 1.0         # Officers speak at normal conversational speed.
 
+# Response Modes — structured mode system (new in v0.3)
+#
+# ``active_mode`` selects the mode applied to all cameras by default.
+# ``camera_overrides`` maps individual camera names to a different mode ID.
+# ``modes`` is an optional list of user-defined custom modes (see structure below).
+#
+# Available built-in modes (by category):
+#
+# Core (serious, production-ready):
+#   police_dispatch        — Multi-voice radio simulation with 10-codes
+#   live_operator          — Real-person "I can see you" energy
+#   private_security       — Corporate security firm authority
+#   homeowner              — Personal direct voice from the owner
+#   evidence_collection    — Cold automated logging system
+#
+# Advanced (targeted psychological pressure):
+#   silent_pressure        — Minimum words, maximum tension (new!)
+#   neighborhood_alert     — Implies the whole block knows
+#   automated_surveillance — Neutral AI monitoring system
+#
+# Novelty (theatrical, good for demos):
+#   mafioso                — Tough wiseguy
+#   disappointed_parent    — Guilt-trip deterrence
+#   pirate_captain         — Theatrical nautical threats
+#   tony_montana           — Scarface energy
+#
+response_modes:
+  active_mode: "police_dispatch"   # Default mode for all cameras
+  # Per-camera overrides: map camera name (must match Frigate camera name)
+  # to a mode ID.  The camera will use this mode instead of active_mode.
+  camera_overrides: {}
+  # Example per-camera overrides:
+  # camera_overrides:
+  #   backyard_cam: "homeowner"
+  #   front_door: "police_dispatch"
+  #   side_gate: "silent_pressure"
+
+  # User-defined custom modes — extend or override built-in modes.
+  # Each entry must have an ``id`` field.  All other fields are optional.
+  # Full schema example (all fields shown):
+  #
+  # modes:
+  #   - id: my_custom_mode
+  #     category: custom          # core | advanced | novelty | custom
+  #     name: My Custom Mode
+  #     description: What this mode does and when to use it.
+  #     effect: Short label of psychological effect on intruder.
+  #     tone:
+  #       mood: authoritative     # Hint for expressive TTS providers
+  #       speed_multiplier: 1.0   # 0.5–2.0
+  #       radio_effect: false
+  #     voice:
+  #       kokoro_voice: af_bella  # Override TTS voice for this mode
+  #     behavior:
+  #       is_dispatch: false      # True = use radio dispatch pipeline
+  #       use_radio_effect: false
+  #       json_ai_output: false   # True = AI returns JSON object
+  #     stages:
+  #       stage1:
+  #         prompt_modifier: ""
+  #         templates:
+  #           - "You are on private property. Leave now."
+  #           - "This is a restricted area. Vacate immediately."
+  #       stage2:
+  #         prompt_modifier: >
+  #           You are a stern security officer. Reference the person's clothing.
+  #           Return a JSON array of 1-2 short phrases.
+  #         templates:
+  #           - "{clothing_description} at {location_on_property} — identified."
+  #       stage3:
+  #         prompt_modifier: >
+  #           Security escalation. The person has not left. Reference behavior.
+  #           Return a JSON array of 1-2 short phrases.
+  #         templates:
+  #           - "Observed {behavior_description}. Authorities notified."
+  modes: []
+
 # Pipeline escalation — controls the two-stage deterrent timing.
 #
 # Detection fires the pipeline. Initial Response plays immediately. If the
@@ -315,6 +392,31 @@ pipeline:
   resolution:
     enabled: false             # Set true to play a "clear" message when person leaves
     message: "Area clear."     # Message spoken when person departs
+
+# Natural Cadence Speech System
+# When enabled, multi-phrase AI responses are rendered with human-like
+# inter-phrase pauses and optional per-phrase speed variation instead of
+# being read as a single continuous string.  This only activates when the
+# AI returns a JSON array of short phrases — plain-text responses always
+# use the standard flat-string TTS path.
+speech:
+  natural_cadence:
+    enabled: true              # Set false to always use flat-string TTS
+    # Inter-phrase pause durations (seconds)
+    min_pause: 0.2             # Minimum gap between phrases (no terminal punctuation)
+    max_pause: 0.6             # Maximum gap between phrases (no terminal punctuation)
+    period_pause: 0.5          # Gap after phrase ending with "."
+    ellipsis_pause: 0.7        # Gap after phrase ending with "..."
+    comma_pause: 0.2           # Gap after phrase ending with ","
+    # Per-phrase speed variation (applied via ffmpeg atempo filter)
+    speed_variation: true      # Set false for completely uniform playback speed
+    min_speed: 0.92            # Slowest random speed (92% of normal)
+    max_speed: 1.08            # Fastest random speed (108% of normal)
+    # Leading/trailing silence pads around the entire announcement
+    leading_pause: 0.3         # Silence before the first phrase
+    trailing_pause: 0.2        # Silence after the last phrase
+    # Post-processing pass: light compression + silence trim + loudness normalise
+    postprocess: true          # Set false to skip the post-processing pass
 
 # Logging
 logging:

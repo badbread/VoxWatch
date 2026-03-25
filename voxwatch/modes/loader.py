@@ -1,0 +1,1341 @@
+"""
+loader.py — Response Mode Loading, Resolution, and Prompt/Template Rendering.
+
+This module is the public entry point for the VoxWatch response-mode system.
+It replaces the flat dictionaries (``RESPONSE_MODES``, ``DEFAULT_MESSAGES``)
+that were previously hard-coded in ``ai_vision.py``.
+
+Key responsibilities
+--------------------
+- Parse the ``response_modes`` section of config.yaml into typed
+  :class:`~voxwatch.modes.mode.ResponseMode` objects.
+- Resolve the active mode for a given detection event, honouring per-camera
+  overrides defined under ``response_modes.camera_overrides``.
+- Build AI prompts with the active mode's ``prompt_modifier`` injected.
+- Render fallback templates with ``{variable}`` substitution using AI
+  description variables extracted from prior AI responses.
+
+AI description variables
+------------------------
+Every template and prompt modifier may reference these placeholders:
+
+    ``{clothing_description}`` — outer clothing description from AI vision
+    ``{location_on_property}`` — where on the property the subject was seen
+    ``{behavior_description}`` — what the subject was doing
+    ``{suspect_count}``        — number of subjects (e.g. "one", "two")
+    ``{address_street}``       — ``property.street`` from config
+    ``{address_full}``         — ``property.full_address`` from config
+    ``{time_of_day}``          — current local hour label ("morning", "night", …)
+    ``{camera_name}``          — Frigate camera name from the detection event
+
+When a variable is not available (e.g. no AI response yet), it is replaced
+with a sensible neutral fallback string so TTS output is never broken.
+
+Per-camera overrides
+--------------------
+::
+
+    response_modes:
+      active_mode: "police_dispatch"
+      camera_overrides:
+        backyard_cam: "homeowner"
+        front_door: "police_dispatch"
+
+Built-in mode definitions
+--------------------------
+All 12 built-in modes are defined in the ``_BUILTIN_MODES`` constant at the
+bottom of this module.  User-defined modes in config.yaml are merged on top;
+built-in modes act as the fallback library.  Unknown mode IDs degrade to the
+``"standard"`` fallback rather than crashing.
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import datetime
+from typing import Any, Optional
+
+from voxwatch.modes.mode import (
+    BehaviorConfig,
+    ResponseMode,
+    StageConfig,
+    ToneConfig,
+    VoiceConfig,
+)
+
+logger = logging.getLogger("voxwatch.modes.loader")
+
+# ── Variable fallback values ──────────────────────────────────────────────────
+# Used when a template variable has no resolved value.
+
+_VAR_FALLBACKS: dict[str, str] = {
+    "clothing_description": "the individual",
+    "location_on_property": "the property",
+    "behavior_description": "their current actions",
+    "suspect_count": "one",
+    "address_street": "this address",
+    "address_full": "this address",
+    "time_of_day": "this hour",
+    "camera_name": "the camera",
+}
+
+# ── Time-of-day label helper ──────────────────────────────────────────────────
+
+def _time_of_day_label() -> str:
+    """Return a human-readable time-of-day label for the current local time.
+
+    Returns:
+        One of ``"early morning"``, ``"morning"``, ``"afternoon"``,
+        ``"evening"``, or ``"night"`` based on the current local hour.
+    """
+    hour = datetime.now().hour
+    if 5 <= hour < 9:
+        return "early morning"
+    if 9 <= hour < 12:
+        return "morning"
+    if 12 <= hour < 17:
+        return "afternoon"
+    if 17 <= hour < 21:
+        return "evening"
+    return "night"
+
+
+# ── Built-in mode definitions ─────────────────────────────────────────────────
+
+def _stage(
+    prompt_modifier: str,
+    templates: list[str],
+) -> StageConfig:
+    """Convenience constructor for a StageConfig.
+
+    Args:
+        prompt_modifier: System-role instruction to prepend to the AI prompt.
+        templates: Ordered list of fallback template strings.
+
+    Returns:
+        A populated :class:`~voxwatch.modes.mode.StageConfig`.
+    """
+    return StageConfig(prompt_modifier=prompt_modifier, templates=templates)
+
+
+def _mode(
+    id: str,
+    category: str,
+    name: str,
+    description: str,
+    effect: str,
+    stages: dict[str, StageConfig],
+    *,
+    tone: Optional[ToneConfig] = None,
+    voice: Optional[VoiceConfig] = None,
+    behavior: Optional[BehaviorConfig] = None,
+) -> ResponseMode:
+    """Convenience constructor for a ResponseMode.
+
+    Args:
+        id: Unique mode identifier string.
+        category: Category label — one of ``"core"``, ``"advanced"``,
+            ``"novelty"``, or ``"custom"``.
+        name: Human-readable display name.
+        description: One-line description for the UI.
+        effect: Short psychological-effect label.
+        stages: Dict mapping stage keys to StageConfig instances.
+        tone: Optional ToneConfig; defaults to plain ToneConfig().
+        voice: Optional VoiceConfig; defaults to plain VoiceConfig().
+        behavior: Optional BehaviorConfig; defaults to plain BehaviorConfig().
+
+    Returns:
+        A fully populated :class:`~voxwatch.modes.mode.ResponseMode`.
+    """
+    return ResponseMode(
+        id=id,
+        category=category,
+        name=name,
+        description=description,
+        effect=effect,
+        tone=tone or ToneConfig(),
+        voice=voice or VoiceConfig(),
+        behavior=behavior or BehaviorConfig(),
+        stages=stages,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Built-in mode library
+# ---------------------------------------------------------------------------
+# These 12 modes are always available regardless of config.yaml content.
+# User-defined modes in config.yaml are layered on top; they can override
+# a built-in by using the same ``id``.
+# ---------------------------------------------------------------------------
+
+_BUILTIN_MODES: list[ResponseMode] = [
+
+    # ── Core Modes ───────────────────────────────────────────────────────────
+
+    _mode(
+        id="police_dispatch",
+        category="core",
+        name="Police Dispatch",
+        description=(
+            "Multi-voice radio simulation. Sounds like a real dispatch center "
+            "is routing police to your address."
+        ),
+        effect="Sounds like a real dispatch center routing police to your address",
+        behavior=BehaviorConfig(
+            is_dispatch=True,
+            use_radio_effect=True,
+            officer_response=True,
+            json_ai_output=True,
+            scene_context_prefix=True,
+        ),
+        tone=ToneConfig(mood="authoritative", speed_multiplier=0.9, radio_effect=True),
+        stages={
+            "stage1": _stage(
+                prompt_modifier=(
+                    "You are a female police dispatcher on a radio channel. "
+                    "Speak in police radio dispatch language — 10-codes, calm "
+                    "professional tone, concise and factual."
+                ),
+                templates=[
+                    "All units... be advised. Subject detected at {address_street}.",
+                    "{camera_name} dispatch... 10-97 at {address_street}. Subject detected.",
+                    "All units... 10-97. Unauthorized subject on premises.",
+                ],
+            ),
+            "stage2": _stage(
+                prompt_modifier=(
+                    "You are a police dispatcher receiving a camera feed report. "
+                    "Respond with ONLY a JSON object — no markdown fences, no preamble. "
+                    "Use short, factual dispatch language.\n\n"
+                    "Required JSON schema:\n"
+                    "{\n"
+                    '  "suspect_count": "one" | "two" | "multiple",\n'
+                    '  "description": "sex, age-range, clothing top-to-bottom, build",\n'
+                    '  "location": "where they are relative to the property"\n'
+                    "}\n\n"
+                    "Rules:\n"
+                    "- description: comma-separated fragments, no full sentences. "
+                    'Example: "male, dark hoodie, gray pants, medium build"\n'
+                    "- location: one short clause. "
+                    'Example: "approaching front door from driveway"\n'
+                    "- If night vision (grayscale/green): skip colors, describe silhouette "
+                    "and clothing type instead.\n"
+                    "- All fields required. Use \"unknown\" if truly indeterminate.\n"
+                    "- Respond with ONLY the JSON object, nothing else."
+                ),
+                templates=[
+                    "Dispatch... {suspect_count} subject. {clothing_description}. "
+                    "{location_on_property}.",
+                    "All units... suspect described as {clothing_description} at "
+                    "{location_on_property}.",
+                ],
+            ),
+            "stage3": _stage(
+                prompt_modifier=(
+                    "You are a police dispatcher receiving a live camera update. "
+                    "Respond with ONLY a JSON object — no markdown fences, no preamble. "
+                    "Use short, factual dispatch language.\n\n"
+                    "Required JSON schema:\n"
+                    "{\n"
+                    '  "behavior": "what the suspect is actively doing right now",\n'
+                    '  "movement": "how the suspect has moved since last report"\n'
+                    "}\n\n"
+                    "Rules:\n"
+                    "- behavior: comma-separated active-voice fragments. "
+                    'Example: "testing gate latch, looking over shoulder toward street"\n'
+                    "- movement: one short clause describing position change. "
+                    'Example: "moved from driveway to side gate"\n'
+                    "- If no clear movement, set movement to \"stationary\".\n"
+                    "- If night vision (grayscale/green): focus on actions, not colors.\n"
+                    "- All fields required. Use \"unknown\" if truly indeterminate.\n"
+                    "- Respond with ONLY the JSON object, nothing else."
+                ),
+                templates=[
+                    "Dispatch update. Suspect {behavior_description} at {location_on_property}. "
+                    "Advise immediate departure.",
+                    "Update: subject still on premises. {behavior_description}. "
+                    "Respond code three.",
+                ],
+            ),
+        },
+    ),
+
+    _mode(
+        id="live_operator",
+        category="core",
+        name="Live Operator",
+        description=(
+            "Sounds like a real person is actively watching the camera feed right now. "
+            "Personal, direct, and specific."
+        ),
+        effect="Makes the subject feel personally watched by a real human",
+        tone=ToneConfig(mood="watchful", speed_multiplier=1.0),
+        stages={
+            "stage1": _stage(
+                prompt_modifier="",
+                templates=[
+                    "I can see you right now. Step away from the property.",
+                    "Hey. I'm watching this feed live. You need to leave.",
+                    "I can see you on camera. Walk away now.",
+                ],
+            ),
+            "stage2": _stage(
+                prompt_modifier=(
+                    "You are a live human operator watching this camera feed right now. "
+                    "Speak directly and personally — you can see the person in real time. "
+                    "Be calm but absolutely firm. Short sentences only. "
+                    "Make them feel like a real person is watching them specifically. "
+                    "Reference what they are wearing or doing. Address them directly with 'you'. "
+                    "Return a JSON array of 1-2 short phrases (under 15 words each) that "
+                    "will be read aloud in sequence for natural cadence. "
+                    'Example: ["I can see your {clothing_description}.", "You need to leave now."]'
+                ),
+                templates=[
+                    "I can see you — {clothing_description}. You need to leave right now.",
+                    "I'm watching you at {location_on_property}. I can see everything. Leave.",
+                ],
+            ),
+            "stage3": _stage(
+                prompt_modifier=(
+                    "You are a live operator who has been watching this person for several "
+                    "seconds. You know exactly what they are doing. Be specific about their "
+                    "actions. Short, direct, calm but serious. "
+                    "Return a JSON array of 1-2 short phrases (under 15 words each). "
+                    'Example: ["I see what you\'re doing at that gate.", "I\'ve already called."]'
+                ),
+                templates=[
+                    "I can see you {behavior_description}. I've already made the call.",
+                    "Still watching you at {location_on_property}. Leave before this gets worse.",
+                ],
+            ),
+        },
+    ),
+
+    _mode(
+        id="private_security",
+        category="core",
+        name="Private Security",
+        description=(
+            "Professional corporate security firm voice. Firm, formal, no-nonsense. "
+            "Implies a staffed monitoring center."
+        ),
+        effect="Projects professional authority — implies staffed monitoring",
+        tone=ToneConfig(mood="authoritative", speed_multiplier=0.95),
+        stages={
+            "stage1": _stage(
+                prompt_modifier="",
+                templates=[
+                    "Attention. You are on private property under active surveillance.",
+                    "This is a private security notice. You have been detected on restricted property.",
+                    "Security alert. You are on private property. Vacate immediately.",
+                ],
+            ),
+            "stage2": _stage(
+                prompt_modifier=(
+                    "You are a professional private security officer. Be firm, formal, and direct. "
+                    "No threats — just absolute authority. Use professional security language. "
+                    "Make it clear this is private property under active monitoring. "
+                    "Reference the subject's specific appearance to show they have been identified. "
+                    "Return a JSON array of 1-2 short phrases (under 20 words each). "
+                    'Example: ["Individual in {clothing_description} — you have been identified.", '
+                    '"Vacate the premises immediately."]'
+                ),
+                templates=[
+                    "Individual in {clothing_description} at {location_on_property} — "
+                    "you have been identified. Vacate immediately.",
+                    "Security alert: subject detected at {location_on_property}. "
+                    "This incident is being logged. Leave the property now.",
+                ],
+            ),
+            "stage3": _stage(
+                prompt_modifier=(
+                    "You are a private security officer observing continued unauthorized presence. "
+                    "Escalate authority — make it clear that law enforcement is being contacted. "
+                    "Reference the subject's specific behavior. Formal, professional, final warning. "
+                    "Return a JSON array of 1-2 short phrases (under 20 words each)."
+                ),
+                templates=[
+                    "You have been observed {behavior_description} at {location_on_property}. "
+                    "Authorities have been contacted. Leave now.",
+                    "Final warning. Subject {behavior_description} — law enforcement notified. "
+                    "Vacate the premises.",
+                ],
+            ),
+        },
+    ),
+
+    _mode(
+        id="homeowner",
+        category="core",
+        name="Homeowner",
+        description=(
+            "Direct personal voice — sounds like the property owner is speaking "
+            "through their own system."
+        ),
+        effect="Personal and direct — sounds like you're home and watching",
+        tone=ToneConfig(mood="firm", speed_multiplier=1.0),
+        stages={
+            "stage1": _stage(
+                prompt_modifier="",
+                templates=[
+                    "Hey. I can see you. Please leave my property.",
+                    "I can see you on my cameras. You need to go.",
+                    "This is private property. I'm watching. Leave now.",
+                ],
+            ),
+            "stage2": _stage(
+                prompt_modifier=(
+                    "You are the homeowner speaking through your security system. "
+                    "Be personal, direct, and clear — not aggressive, but unmistakably serious. "
+                    "You can see them. You know what they are wearing. "
+                    "Use conversational language. Address them as 'you'. "
+                    "Return a JSON array of 1-2 short conversational phrases (under 15 words each). "
+                    'Example: ["I can see you in that {clothing_description}.", "Please leave now."]'
+                ),
+                templates=[
+                    "I can see you — {clothing_description}. Please leave my property.",
+                    "Hey. I see you at {location_on_property}. I'm calling the police right now.",
+                ],
+            ),
+            "stage3": _stage(
+                prompt_modifier=(
+                    "You are the homeowner watching your cameras. The person has not left. "
+                    "You are now more serious. Make it clear you are calling police. "
+                    "Reference what they are doing specifically. Short, direct, calm but firm. "
+                    "Return a JSON array of 1-2 phrases (under 15 words each)."
+                ),
+                templates=[
+                    "I said leave. I can see you {behavior_description}. Police are on the way.",
+                    "Still here at {location_on_property}? I've already called. Last chance.",
+                ],
+            ),
+        },
+    ),
+
+    _mode(
+        id="evidence_collection",
+        category="core",
+        name="Evidence Collection",
+        description=(
+            "Cold, clinical automated logging system. No emotion, no threats — "
+            "just the icy certainty that everything is being permanently recorded."
+        ),
+        effect="The chill of a system that records everything without judgment",
+        tone=ToneConfig(mood="cold", speed_multiplier=0.9),
+        stages={
+            "stage1": _stage(
+                prompt_modifier="",
+                templates=[
+                    "Recording initiated. Unauthorized subject logged. Entry attempt documented.",
+                    "Evidence capture active. Subject detected. Timestamp recorded.",
+                    "Automated alert: unauthorized presence detected and logged.",
+                ],
+            ),
+            "stage2": _stage(
+                prompt_modifier=(
+                    "You are an automated evidence-logging system. "
+                    "Speak in cold, clinical, system-driven language. No emotion, no threats. "
+                    "State facts: what was observed, that it has been recorded, transmitted. "
+                    "Reference the time, the camera, and the subject's appearance factually. "
+                    "Return a JSON array of 1-2 short clinical phrases (under 20 words each). "
+                    'Example: ["Subject recorded: {clothing_description}. Timestamp logged.", '
+                    '"Data transmitted to {camera_name} archive."]'
+                ),
+                templates=[
+                    "Subject recorded: {clothing_description} at {location_on_property}. "
+                    "Timestamp logged. Data transmitted.",
+                    "Evidence capture: {suspect_count} subject at {camera_name}. "
+                    "Biometric data being processed.",
+                ],
+            ),
+            "stage3": _stage(
+                prompt_modifier=(
+                    "You are an automated evidence system logging continued unauthorized presence. "
+                    "State what the subject is doing factually and clinically. "
+                    "Reference that all behavior is being documented. Cold, final, certain. "
+                    "Return a JSON array of 1-2 short clinical phrases (under 20 words each)."
+                ),
+                templates=[
+                    "Continued recording: subject {behavior_description}. "
+                    "All activity documented for law enforcement.",
+                    "Behavioral log updated: {behavior_description} at {location_on_property}. "
+                    "File transmitted.",
+                ],
+            ),
+        },
+    ),
+
+    # ── Advanced Modes ───────────────────────────────────────────────────────
+
+    _mode(
+        id="silent_pressure",
+        category="advanced",
+        name="Silent Pressure",
+        description=(
+            "Minimum words, maximum tension. Implies total awareness without "
+            "explaining anything. The silence between the words does the work."
+        ),
+        effect="Unsettling certainty — they know you know",
+        tone=ToneConfig(mood="menacing", speed_multiplier=0.85),
+        stages={
+            "stage1": _stage(
+                prompt_modifier="",
+                templates=[
+                    "We see you.",
+                    "Noted.",
+                    "Stop.",
+                ],
+            ),
+            "stage2": _stage(
+                prompt_modifier=(
+                    "You are a presence that knows everything and says almost nothing. "
+                    "You see the person clearly. You do not threaten — you simply confirm "
+                    "absolute awareness. Minimum words. Maximum weight. "
+                    "Two to five words maximum per phrase. Do not explain. Do not elaborate. "
+                    "Return a JSON array of 1-2 very short phrases (2-6 words each). "
+                    'Example: ["We see you.", "{clothing_description}. Noted."]'
+                ),
+                templates=[
+                    "{clothing_description}. We see you.",
+                    "We know. {location_on_property}. Leave.",
+                    "Recorded. Leave now.",
+                ],
+            ),
+            "stage3": _stage(
+                prompt_modifier=(
+                    "You are a presence that has been watching for a while now. "
+                    "Still minimum words. Slightly colder. More final. "
+                    "The subject should feel that their decision has been made for them. "
+                    "Return a JSON array of 1-2 very short phrases (2-6 words each). "
+                    'Example: ["Still here.", "Wrong choice."]'
+                ),
+                templates=[
+                    "Still here. Wrong choice.",
+                    "Last chance.",
+                    "We're done waiting.",
+                ],
+            ),
+        },
+    ),
+
+    _mode(
+        id="neighborhood_alert",
+        category="advanced",
+        name="Neighborhood Alert",
+        description=(
+            "Implies the entire neighborhood is watching and has already been "
+            "notified. Social pressure from a community, not just a camera."
+        ),
+        effect="The whole street is watching — public accountability pressure",
+        tone=ToneConfig(mood="communal", speed_multiplier=1.0),
+        stages={
+            "stage1": _stage(
+                prompt_modifier="",
+                templates=[
+                    "Neighbors have been alerted. This street is being monitored.",
+                    "Community alert active. Multiple households have been notified.",
+                    "You are being watched by the entire neighborhood right now.",
+                ],
+            ),
+            "stage2": _stage(
+                prompt_modifier=(
+                    "You are a neighborhood watch coordinator making a community alert. "
+                    "Reference that neighbors are watching, the community has been alerted, "
+                    "and this activity has already been reported to multiple households. "
+                    "Use firm community-authority language — the whole street is aware. "
+                    "Reference the subject's appearance so they know they've been identified. "
+                    "Return a JSON array of 1-2 short phrases (under 20 words each). "
+                    'Example: ["Neighborhood alert: {clothing_description} at {location_on_property}.", '
+                    '"Multiple households have been notified."]'
+                ),
+                templates=[
+                    "Neighborhood alert: {clothing_description} spotted at {location_on_property}. "
+                    "Multiple households have been notified.",
+                    "This street is watching you. {clothing_description} — you have been "
+                    "identified by the community.",
+                ],
+            ),
+            "stage3": _stage(
+                prompt_modifier=(
+                    "You are a neighborhood watch coordinator reporting continued suspicious activity. "
+                    "Reference that neighbors have now seen this person and the police have been called. "
+                    "Community solidarity language — many people are watching, not just cameras. "
+                    "Return a JSON array of 1-2 short phrases (under 20 words each)."
+                ),
+                templates=[
+                    "Multiple neighbors are watching you {behavior_description}. "
+                    "Police have been notified.",
+                    "The whole street has seen you at {location_on_property}. "
+                    "This is your last warning.",
+                ],
+            ),
+        },
+    ),
+
+    _mode(
+        id="automated_surveillance",
+        category="advanced",
+        name="Automated Surveillance",
+        description=(
+            "Neutral AI monitoring system. Detached, clinical, system language. "
+            "Implies facial recognition and behavioral analysis."
+        ),
+        effect="Cold AI certainty — implies biometric logging and analysis",
+        tone=ToneConfig(mood="clinical", speed_multiplier=0.9),
+        stages={
+            "stage1": _stage(
+                prompt_modifier="",
+                templates=[
+                    "Movement detected. Behavior flagged. Identity processing.",
+                    "Automated alert: unauthorized subject detected. Behavioral analysis running.",
+                    "Surveillance system: subject detected. Logging initiated.",
+                ],
+            ),
+            "stage2": _stage(
+                prompt_modifier=(
+                    "You are a neutral AI surveillance system. "
+                    "Speak in detached, clinical, system language. "
+                    "Use terms like 'subject', 'behavior', 'flagged', 'logged', 'processed'. "
+                    "Reference specific observed appearance factually as a system would. "
+                    "Imply facial recognition and biometric analysis. "
+                    "Return a JSON array of 1-2 short phrases (under 20 words each). "
+                    'Example: ["Subject identified: {clothing_description}. Identity logged.", '
+                    '"Location confirmed: {location_on_property}. Alert transmitted."]'
+                ),
+                templates=[
+                    "Subject identified: {clothing_description}. "
+                    "Location logged: {location_on_property}. Alert transmitted.",
+                    "Biometric processing: {suspect_count} subject at {camera_name}. "
+                    "Behavioral profile updated.",
+                ],
+            ),
+            "stage3": _stage(
+                prompt_modifier=(
+                    "You are an AI surveillance system logging continued unauthorized presence. "
+                    "Reference the subject's actions clinically and factually. "
+                    "Imply that their behavior pattern has been analyzed and flagged. "
+                    "Detached, system-language, final. "
+                    "Return a JSON array of 1-2 short phrases (under 20 words each)."
+                ),
+                templates=[
+                    "Behavioral flag: subject {behavior_description} at {location_on_property}. "
+                    "Pattern analysis complete. Authorities notified.",
+                    "Continued unauthorized presence logged. "
+                    "Subject {behavior_description}. Escalation protocol active.",
+                ],
+            ),
+        },
+    ),
+
+    # ── Novelty Modes ────────────────────────────────────────────────────────
+
+    _mode(
+        id="mafioso",
+        category="novelty",
+        name="Mafioso",
+        description=(
+            "Tough Italian-American wiseguy. Intimidating but subtly humorous. "
+            "You picked the wrong house, pal."
+        ),
+        effect="Theatrical mob-boss energy with genuine menace underneath",
+        tone=ToneConfig(mood="theatrical", speed_multiplier=1.0),
+        stages={
+            "stage1": _stage(
+                prompt_modifier="",
+                templates=[
+                    "Hey pal. Wrong house.",
+                    "You gotta be kiddin' me. Walk away.",
+                    "Hey. We see you. Wrong move.",
+                ],
+            ),
+            "stage2": _stage(
+                prompt_modifier=(
+                    "You are a tough Italian-American wiseguy watching security cameras. "
+                    "Use a street-smart, intimidating but slightly humorous tone. "
+                    "Address the person directly. Use phrases like 'Hey', 'pal', 'buddy', 'friend'. "
+                    "Reference their appearance. Make it clear they have been spotted and should go. "
+                    "Return a JSON array of 1-2 short phrases (under 15 words each). "
+                    'Example: ["Hey {clothing_description} — I see you.", '
+                    '"Wrong house, pal. Walk away."]'
+                ),
+                templates=[
+                    "Hey {clothing_description} — I see you, pal. Wrong house.",
+                    "You at {location_on_property} — yeah, you. Walk away. Now.",
+                ],
+            ),
+            "stage3": _stage(
+                prompt_modifier=(
+                    "You are a wiseguy who has now lost patience. The person has not left. "
+                    "Still street-smart and slightly theatrical but now genuinely irritated. "
+                    "Reference what they are doing. This is their last chance. "
+                    "Return a JSON array of 1-2 short phrases (under 15 words each)."
+                ),
+                templates=[
+                    "Still here? {behavior_description}? You got a death wish, buddy?",
+                    "Last time I'm gonna say this. Get outta here. Right now.",
+                ],
+            ),
+        },
+    ),
+
+    _mode(
+        id="disappointed_parent",
+        category="novelty",
+        name="Disappointed Parent",
+        description=(
+            "Guilt trip mode. Speaks as a disappointed parent who expected better. "
+            "Embarrassment as deterrence."
+        ),
+        effect="Shame and embarrassment — harder to shake than a direct threat",
+        tone=ToneConfig(mood="disappointed", speed_multiplier=1.05),
+        stages={
+            "stage1": _stage(
+                prompt_modifier="",
+                templates=[
+                    "Really? At {time_of_day}? I expected better than this.",
+                    "Oh, come on. You know better than this.",
+                    "I am so disappointed right now. Just stop.",
+                ],
+            ),
+            "stage2": _stage(
+                prompt_modifier=(
+                    "You are speaking as a deeply disappointed parent who caught someone "
+                    "doing something wrong. Sighing, guilt-tripping, genuinely let down. "
+                    "Use phrases like 'Really?', 'I expected better', 'You know better than this'. "
+                    "Reference their appearance. Make them feel embarrassed rather than threatened. "
+                    "Return a JSON array of 1-2 short phrases (under 15 words each). "
+                    'Example: ["Really? {clothing_description}? At {time_of_day}?", '
+                    '"I thought better of you."]'
+                ),
+                templates=[
+                    "Really? {clothing_description}? At {time_of_day}? I'm so disappointed.",
+                    "You're better than this. Standing at {location_on_property} at {time_of_day}?",
+                ],
+            ),
+            "stage3": _stage(
+                prompt_modifier=(
+                    "The person has not left. You are now beyond disappointed — you are sad "
+                    "and resigned. Reference what they are doing. Make them feel the weight of "
+                    "having ignored a final chance to do the right thing. "
+                    "Return a JSON array of 1-2 short phrases (under 15 words each)."
+                ),
+                templates=[
+                    "Still {behavior_description}? I'm calling. I really didn't want to do this.",
+                    "Okay. I gave you a chance. I'm done being disappointed. Police are coming.",
+                ],
+            ),
+        },
+    ),
+
+    _mode(
+        id="pirate_captain",
+        category="novelty",
+        name="Pirate Captain",
+        description=(
+            "Theatrical pirate captain. Entertaining but makes it abundantly clear "
+            "the intruder picked the wrong ship to board."
+        ),
+        effect="Theatrical enough to be memorable — they'll tell their friends",
+        tone=ToneConfig(mood="theatrical", speed_multiplier=1.1),
+        stages={
+            "stage1": _stage(
+                prompt_modifier="",
+                templates=[
+                    "Arrr, ye scallywag! Ye dare trespass on me property?",
+                    "Shiver me timbers! Ye be on me land, ye bilge rat!",
+                    "Avast! Unauthorized boarding detected. Walk the plank!",
+                ],
+            ),
+            "stage2": _stage(
+                prompt_modifier=(
+                    "You are a boisterous pirate captain who has spotted an intruder. "
+                    "Use pirate slang: 'Arrr', 'ye scallywag', 'matey', 'bilge rat', "
+                    "'walk the plank', 'shiver me timbers'. "
+                    "Be threatening but theatrical. Reference their appearance. "
+                    "Return a JSON array of 1-2 short phrases (under 15 words each). "
+                    'Example: ["Arrr! Ye in the {clothing_description} — off me property!", '
+                    '"Or ye\'ll be walkin\' the plank, scallywag!"]'
+                ),
+                templates=[
+                    "Arrr! Ye in the {clothing_description} at {location_on_property} — "
+                    "off me property!",
+                    "Shiver me timbers! One more step and ye'll walk the plank, matey!",
+                ],
+            ),
+            "stage3": _stage(
+                prompt_modifier=(
+                    "The scallywag has not fled. You are furious now, but still theatrical. "
+                    "Reference what they are doing. Threaten dramatically in pirate fashion. "
+                    "Return a JSON array of 1-2 short phrases (under 15 words each)."
+                ),
+                templates=[
+                    "Still {behavior_description}? Ye be the boldest bilge rat I've seen!",
+                    "Arrr! I've called the constabulary! "
+                    "Last chance to abandon ship, ye scallywag!",
+                ],
+            ),
+        },
+    ),
+
+    _mode(
+        id="tony_montana",
+        category="novelty",
+        name="Tony Montana",
+        description=(
+            "Scarface energy. Thick Cuban-accent intensity. This is YOUR house "
+            "and nobody disrespects you."
+        ),
+        effect="Over-the-top theatrical menace — unforgettable deterrent",
+        tone=ToneConfig(mood="theatrical", speed_multiplier=1.1),
+        stages={
+            "stage1": _stage(
+                prompt_modifier="",
+                templates=[
+                    "This is MY house. You wanna play rough? Get out.",
+                    "Say hello to my little friend. Wrong address, amigo.",
+                    "You think you can come to MY house? Get outta here.",
+                ],
+            ),
+            "stage2": _stage(
+                prompt_modifier=(
+                    "You are speaking as Tony Montana from Scarface. "
+                    "Thick Cuban-accent energy. Aggressive, dramatic, territorial. "
+                    "This is YOUR property and nobody disrespects you. "
+                    "Use phrases like 'Say hello to my little friend', 'You wanna play rough?', "
+                    "'This is MY house', 'amigo', 'You think you can'. "
+                    "Reference their appearance. Over-the-top theatrical but make it clear "
+                    "they picked the wrong address. "
+                    "Return a JSON array of 1-2 short phrases (under 15 words each). "
+                    'Example: ["You in the {clothing_description} — this is MY house!", '
+                    '"You wanna play rough? Wrong address, amigo."]'
+                ),
+                templates=[
+                    "You in the {clothing_description}! This is MY house! Get out!",
+                    "Say hello to my little friend, amigo. "
+                    "You at {location_on_property} — wrong address.",
+                ],
+            ),
+            "stage3": _stage(
+                prompt_modifier=(
+                    "Tony Montana has had enough. The person is still there. Escalate dramatically. "
+                    "Reference what they are doing. Fully in character, threatening in Tony's style. "
+                    "Return a JSON array of 1-2 short phrases (under 15 words each)."
+                ),
+                templates=[
+                    "Still {behavior_description}? You got a death wish? I call the police NOW.",
+                    "You think you can {behavior_description} in MY house? "
+                    "I'm done, amigo. POLICE.",
+                ],
+            ),
+        },
+    ),
+
+    # ── Standard fallback ────────────────────────────────────────────────────
+
+    _mode(
+        id="standard",
+        category="core",
+        name="Standard",
+        description=(
+            "Generic security system voice. Clinical and direct. "
+            "Used as the fallback when an unknown mode is requested."
+        ),
+        effect="Generic deterrent — always functional, never wrong",
+        stages={
+            "stage1": _stage(
+                prompt_modifier="",
+                templates=[
+                    "Attention. You are on private property and being recorded.",
+                    "Warning. Unauthorized presence detected. You are being recorded.",
+                ],
+            ),
+            "stage2": _stage(
+                prompt_modifier=(
+                    "You are a security camera AI. Describe the person briefly and directly. "
+                    "Address them as 'you'. One clear sentence, under 20 words. "
+                    "Return a JSON array with one short phrase."
+                ),
+                templates=[
+                    "{clothing_description} at {location_on_property} — "
+                    "you have been identified. Leave immediately.",
+                    "Individual detected at {location_on_property}. "
+                    "You have been recorded. Authorities are being contacted.",
+                ],
+            ),
+            "stage3": _stage(
+                prompt_modifier=(
+                    "You are a security system issuing a final escalation warning. "
+                    "The person has not left. Reference their current behavior. "
+                    "Direct, clinical, final. Return a JSON array with one short phrase."
+                ),
+                templates=[
+                    "You have been observed {behavior_description}. "
+                    "Leave immediately. Authorities are being contacted.",
+                    "Final warning. {behavior_description} at {location_on_property}. "
+                    "All activity recorded and transmitted.",
+                ],
+            ),
+        },
+    ),
+]
+
+# Index built-in modes by ID for O(1) lookup.
+_BUILTIN_MODE_MAP: dict[str, ResponseMode] = {m.id: m for m in _BUILTIN_MODES}
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+
+def load_modes(config: dict) -> dict[str, ResponseMode]:
+    """Load all mode definitions from config, merging with built-in modes.
+
+    Reads the ``response_modes.modes`` section of the config dict and parses
+    each entry into a :class:`~voxwatch.modes.mode.ResponseMode`.  Built-in
+    modes are always available; user-defined modes with the same ``id`` as a
+    built-in override the built-in definition entirely.
+
+    Unknown or invalid mode definitions are logged and skipped — they do not
+    prevent the service from starting.
+
+    Args:
+        config: Full VoxWatch config dict as loaded by
+            :func:`voxwatch.config.load_config`.
+
+    Returns:
+        Dict mapping mode ID string to :class:`~voxwatch.modes.mode.ResponseMode`.
+        Always contains at least the built-in modes.
+    """
+    # Start with built-ins as the base library.
+    modes: dict[str, ResponseMode] = dict(_BUILTIN_MODE_MAP)
+
+    user_mode_list = (
+        config.get("response_modes", {}).get("modes", [])
+    )
+    if not user_mode_list:
+        return modes
+
+    for raw in user_mode_list:
+        if not isinstance(raw, dict):
+            logger.warning("load_modes: skipping non-dict mode entry: %r", raw)
+            continue
+        try:
+            parsed = _parse_mode_from_dict(raw)
+            modes[parsed.id] = parsed
+            logger.debug("load_modes: loaded user-defined mode '%s'", parsed.id)
+        except (KeyError, TypeError, ValueError) as exc:
+            logger.warning(
+                "load_modes: could not parse mode entry %r — %s", raw, exc
+            )
+
+    return modes
+
+
+def get_active_mode(
+    config: dict,
+    camera_name: Optional[str] = None,
+) -> ResponseMode:
+    """Resolve and return the active ResponseMode for a given detection event.
+
+    Resolution order:
+
+    1. If ``camera_name`` is provided and
+       ``response_modes.camera_overrides[camera_name]`` is set, that mode ID
+       takes precedence.
+    2. Otherwise, ``response_modes.active_mode`` is used.
+    3. Legacy fallback: if neither ``response_modes`` section exists, reads
+       ``response_mode.name`` (the old single-key format).
+    4. If the resolved mode ID is not found in the loaded mode library, logs a
+       warning and returns the ``"standard"`` fallback mode.
+
+    Args:
+        config: Full VoxWatch config dict.
+        camera_name: Optional Frigate camera name for per-camera override lookup.
+
+    Returns:
+        The resolved :class:`~voxwatch.modes.mode.ResponseMode`.
+    """
+    modes = load_modes(config)
+    mode_id = _resolve_mode_id(config, camera_name)
+
+    if mode_id not in modes:
+        logger.warning(
+            "get_active_mode: unknown mode '%s' — falling back to 'standard'.",
+            mode_id,
+        )
+        mode_id = "standard"
+
+    return modes[mode_id]
+
+
+def get_mode_prompt(
+    mode_def: ResponseMode,
+    stage: str,
+    ai_vars: dict[str, str],
+) -> str:
+    """Build the AI system prompt for a given mode and stage.
+
+    Retrieves the ``prompt_modifier`` for the stage from the mode definition
+    and, if non-empty, prepends it to the base AI instruction.  Variable
+    substitution is applied to the ``prompt_modifier`` so it can reference
+    ``{clothing_description}`` and similar placeholders.
+
+    The base prompt instructs the AI to return a JSON array of short phrases
+    suitable for natural cadence audio rendering.
+
+    Args:
+        mode_def: The active :class:`~voxwatch.modes.mode.ResponseMode`.
+        stage: Stage key — one of ``"stage1"``, ``"stage2"``, ``"stage3"``.
+        ai_vars: Dict of AI description variables (see module docstring).
+            Used to substitute ``{variable}`` placeholders in the modifier.
+
+    Returns:
+        Full prompt string ready to pass to the AI vision API.
+    """
+    stage_cfg = mode_def.get_stage(stage)
+    modifier = stage_cfg.prompt_modifier.strip()
+
+    if modifier:
+        # Apply variable substitution to the modifier itself so it can
+        # reference dynamic values like {address_street} or {camera_name}.
+        modifier = _substitute_vars(modifier, ai_vars)
+        return modifier
+
+    # No modifier — return a bare base instruction so the AI still knows
+    # what output format is expected.
+    return (
+        "You are a security camera AI speaker. "
+        "Return a JSON array of 1-2 short deterrent phrases (under 20 words each) "
+        "that will be read aloud through the camera speaker."
+    )
+
+
+def get_mode_template(
+    mode_def: ResponseMode,
+    stage: str,
+    ai_vars: dict[str, str],
+    index: int = 0,
+) -> str:
+    """Render a fallback template string with variable substitution.
+
+    Used when the AI call fails or returns unusable output.  Selects a
+    template from the mode's stage definition and substitutes all
+    ``{variable}`` placeholders using the provided AI variables dict.
+
+    Any variable that is missing from ``ai_vars`` is replaced with the
+    corresponding value from ``_VAR_FALLBACKS`` so the output is always
+    grammatically complete (never contains a raw ``{placeholder}``).
+
+    Args:
+        mode_def: The active :class:`~voxwatch.modes.mode.ResponseMode`.
+        stage: Stage key — one of ``"stage1"``, ``"stage2"``, ``"stage3"``.
+        ai_vars: Dict of resolved AI description variables.
+        index: Which template to select from the stage's template list.
+            Defaults to 0 (the primary template).  Pass a random integer
+            to vary the fallback phrasing across repeated triggers.
+
+    Returns:
+        Rendered fallback string with all variables substituted.  Falls back
+        to the ``"standard"`` mode's template if this mode has none defined.
+    """
+    stage_cfg = mode_def.get_stage(stage)
+    templates = stage_cfg.templates
+
+    if not templates:
+        # Last-resort fallback: use standard mode's template.
+        standard = _BUILTIN_MODE_MAP.get("standard", ResponseMode(
+            id="standard", category="core", name="Standard",
+            description="", effect="",
+        ))
+        templates = standard.get_stage(stage).templates
+
+    if not templates:
+        return "Attention. You are on private property and being recorded."
+
+    idx = index % len(templates)
+    raw = templates[idx]
+    return _substitute_vars(raw, ai_vars)
+
+
+def build_ai_vars(
+    config: dict,
+    camera_name: str,
+    *,
+    clothing_description: str = "",
+    location_on_property: str = "",
+    behavior_description: str = "",
+    suspect_count: str = "",
+) -> dict[str, str]:
+    """Assemble the AI description variables dict for template/prompt rendering.
+
+    Combines AI-extracted values (appearance, location, behavior) with
+    config-sourced values (address) and runtime values (time, camera name).
+    Missing AI values are filled with sensible neutral strings so templates
+    are always grammatically complete.
+
+    Args:
+        config: Full VoxWatch config dict (for address fields).
+        camera_name: Frigate camera name from the detection event.
+        clothing_description: Subject's outer clothing description from AI.
+        location_on_property: Where on the property the subject was seen.
+        behavior_description: What the subject was actively doing.
+        suspect_count: Number of subjects (e.g. ``"one"``, ``"two"``).
+
+    Returns:
+        Dict mapping variable name to resolved string value.
+    """
+    prop = config.get("property", {})
+    street = prop.get("street", "this address").strip() or "this address"
+    full_address = prop.get("full_address", street).strip() or street
+
+    return {
+        "clothing_description": (
+            clothing_description.strip() or _VAR_FALLBACKS["clothing_description"]
+        ),
+        "location_on_property": (
+            location_on_property.strip() or _VAR_FALLBACKS["location_on_property"]
+        ),
+        "behavior_description": (
+            behavior_description.strip() or _VAR_FALLBACKS["behavior_description"]
+        ),
+        "suspect_count": suspect_count.strip() or _VAR_FALLBACKS["suspect_count"],
+        "address_street": street,
+        "address_full": full_address,
+        "time_of_day": _time_of_day_label(),
+        "camera_name": camera_name.strip() or _VAR_FALLBACKS["camera_name"],
+    }
+
+
+def extract_ai_vars_from_dispatch_json(ai_json_str: str) -> dict[str, str]:
+    """Extract AI description variables from a dispatch-mode JSON AI response.
+
+    Dispatch modes instruct the AI to return a structured JSON object with
+    fields like ``suspect_count``, ``description``, and ``location`` (stage 2)
+    or ``behavior`` and ``movement`` (stage 3).  This function parses those
+    fields and maps them to the standard variable names used by templates.
+
+    On parse failure (invalid JSON, missing keys), all extracted values are
+    empty strings so the caller can fall back gracefully.
+
+    Args:
+        ai_json_str: Raw AI response string expected to be a JSON object.
+
+    Returns:
+        Dict with extracted variable values.  Keys match the names used by
+        :func:`build_ai_vars`.  Missing keys are empty strings.
+    """
+    import json  # local import — only needed here
+
+    result: dict[str, str] = {
+        "clothing_description": "",
+        "location_on_property": "",
+        "behavior_description": "",
+        "suspect_count": "",
+    }
+
+    if not ai_json_str:
+        return result
+
+    try:
+        data = json.loads(ai_json_str.strip())
+    except (json.JSONDecodeError, ValueError):
+        logger.debug(
+            "extract_ai_vars_from_dispatch_json: could not parse JSON: %r",
+            ai_json_str[:120],
+        )
+        return result
+
+    if not isinstance(data, dict):
+        return result
+
+    # Stage 2 fields
+    if "description" in data:
+        result["clothing_description"] = str(data["description"])
+    if "location" in data:
+        result["location_on_property"] = str(data["location"])
+    if "suspect_count" in data:
+        result["suspect_count"] = str(data["suspect_count"])
+
+    # Stage 3 fields
+    if "behavior" in data:
+        result["behavior_description"] = str(data["behavior"])
+    if "movement" in data and not result["behavior_description"]:
+        result["behavior_description"] = str(data["movement"])
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Private helpers
+# ---------------------------------------------------------------------------
+
+
+def _resolve_mode_id(config: dict, camera_name: Optional[str]) -> str:
+    """Resolve the effective mode ID from config and optional camera override.
+
+    Args:
+        config: Full VoxWatch config dict.
+        camera_name: Optional Frigate camera name.
+
+    Returns:
+        Mode ID string.
+    """
+    rm_section = config.get("response_modes", {})
+
+    # Per-camera override takes highest priority.
+    if camera_name and rm_section:
+        overrides: dict = rm_section.get("camera_overrides", {})
+        override_id = overrides.get(camera_name, "").strip()
+        if override_id:
+            logger.debug(
+                "_resolve_mode_id: camera '%s' has override mode '%s'",
+                camera_name, override_id,
+            )
+            return override_id
+
+    # New-style active_mode key.
+    if rm_section:
+        active = rm_section.get("active_mode", "").strip()
+        if active:
+            return active
+
+    # Legacy fallback: the old response_mode.name / persona.name key.
+    legacy_cfg: dict = config.get("response_mode", config.get("persona", {}))
+    legacy_name = legacy_cfg.get("name", "").strip()
+    if legacy_name:
+        return legacy_name
+
+    return "standard"
+
+
+def _substitute_vars(text: str, ai_vars: dict[str, str]) -> str:
+    """Substitute ``{variable}`` placeholders in a template string.
+
+    Variables present in ``ai_vars`` are used directly.  Variables missing
+    from ``ai_vars`` fall back to ``_VAR_FALLBACKS``.  Any remaining
+    unresolved placeholders are left as-is (rather than raising) so a
+    misconfigured template never crashes the service.
+
+    Args:
+        text: Template string with optional ``{variable}`` placeholders.
+        ai_vars: Resolved AI description variable values.
+
+    Returns:
+        Template string with all known variables substituted.
+    """
+    merged = {**_VAR_FALLBACKS, **ai_vars}
+    try:
+        return text.format_map(_SafeFormatMap(merged))
+    except (KeyError, ValueError):
+        # Malformed format string — return as-is.
+        return text
+
+
+class _SafeFormatMap(dict):
+    """dict subclass that returns the key name wrapped in braces for missing keys.
+
+    This lets :func:`_substitute_vars` gracefully handle unknown
+    ``{placeholder}`` tokens in user-supplied templates without raising
+    ``KeyError``.
+    """
+
+    def __missing__(self, key: str) -> str:
+        return f"{{{key}}}"
+
+
+def _parse_mode_from_dict(raw: dict[str, Any]) -> ResponseMode:
+    """Parse a user-supplied mode dict (from config.yaml) into a ResponseMode.
+
+    Expected YAML structure::
+
+        id: my_mode
+        category: custom
+        name: My Mode
+        description: Short description.
+        effect: What it does to intruders.
+        tone:
+          mood: authoritative
+          speed_multiplier: 1.0
+          radio_effect: false
+        voice:
+          kokoro_voice: af_bella
+        behavior:
+          is_dispatch: false
+          use_radio_effect: false
+        stages:
+          stage1:
+            prompt_modifier: "You are ..."
+            templates:
+              - "First fallback template."
+              - "Alternate fallback."
+          stage2:
+            prompt_modifier: "..."
+            templates:
+              - "..."
+
+    Args:
+        raw: Raw dict from YAML parsing.
+
+    Returns:
+        Populated :class:`~voxwatch.modes.mode.ResponseMode`.
+
+    Raises:
+        KeyError: If the ``id`` field is missing.
+        ValueError: If ``id`` is empty or non-string.
+    """
+    mode_id = raw["id"]
+    if not isinstance(mode_id, str) or not mode_id.strip():
+        raise ValueError(f"Mode 'id' must be a non-empty string, got: {mode_id!r}")
+
+    # Tone
+    raw_tone = raw.get("tone", {}) or {}
+    tone = ToneConfig(
+        mood=str(raw_tone.get("mood", "neutral")),
+        speed_multiplier=float(raw_tone.get("speed_multiplier", 1.0)),
+        radio_effect=bool(raw_tone.get("radio_effect", False)),
+    )
+
+    # Voice
+    raw_voice = raw.get("voice", {}) or {}
+    voice = VoiceConfig(
+        kokoro_voice=raw_voice.get("kokoro_voice") or None,
+        openai_voice=raw_voice.get("openai_voice") or None,
+        elevenlabs_voice=raw_voice.get("elevenlabs_voice") or None,
+        piper_model=raw_voice.get("piper_model") or None,
+    )
+
+    # Behavior
+    raw_beh = raw.get("behavior", {}) or {}
+    behavior = BehaviorConfig(
+        is_dispatch=bool(raw_beh.get("is_dispatch", False)),
+        use_radio_effect=bool(raw_beh.get("use_radio_effect", False)),
+        officer_response=bool(raw_beh.get("officer_response", True)),
+        json_ai_output=bool(raw_beh.get("json_ai_output", False)),
+        scene_context_prefix=bool(raw_beh.get("scene_context_prefix", True)),
+    )
+
+    # Stages
+    raw_stages = raw.get("stages", {}) or {}
+    stages: dict[str, StageConfig] = {}
+    for stage_key, stage_raw in raw_stages.items():
+        if not isinstance(stage_raw, dict):
+            continue
+        stages[stage_key] = StageConfig(
+            prompt_modifier=str(stage_raw.get("prompt_modifier", "") or ""),
+            templates=[
+                str(t) for t in (stage_raw.get("templates") or [])
+                if t is not None
+            ],
+        )
+
+    return ResponseMode(
+        id=mode_id.strip(),
+        category=str(raw.get("category", "custom")),
+        name=str(raw.get("name", mode_id)),
+        description=str(raw.get("description", "")),
+        effect=str(raw.get("effect", "")),
+        tone=tone,
+        voice=voice,
+        behavior=behavior,
+        stages=stages,
+    )

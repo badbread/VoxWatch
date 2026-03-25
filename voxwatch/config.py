@@ -175,6 +175,19 @@ def _apply_defaults(config: dict) -> dict:
     response_mode.setdefault("name", "private_security")
     response_mode.setdefault("custom_prompt", "")
 
+    # Response Modes — structured YAML-based mode system (new).
+    # ``response_modes.active_mode`` is the preferred key; when absent the
+    # loader falls back to ``response_mode.name`` (legacy compat via
+    # ``voxwatch.modes.loader._resolve_mode_id``).  We deliberately do NOT
+    # default ``active_mode`` here so that existing configs that only set
+    # ``response_mode.name`` continue to route through the legacy fallback
+    # path unchanged.
+    rm_section = config.setdefault("response_modes", {})
+    # ``camera_overrides`` — per-camera mode override map, always a dict.
+    rm_section.setdefault("camera_overrides", {})
+    # ``modes`` — user-defined mode list.  Built-ins are always available.
+    rm_section.setdefault("modes", [])
+
     # Dispatch sub-config — only used when response_mode.name is a dispatch mode
     # (e.g. "police_dispatch").  All fields default to empty string / True so the
     # pipeline can always do a simple truthiness check rather than a KeyError guard.
@@ -257,6 +270,25 @@ def _apply_defaults(config: dict) -> dict:
     prop.setdefault("city", "Your City")
     prop.setdefault("state", "CA")
     prop.setdefault("full_address", "Your Street Address, Your City, CA")
+
+    # Speech — natural cadence system settings.
+    # When enabled, multi-phrase AI responses are rendered with human-like
+    # inter-phrase pauses and optional per-phrase speed variation instead of
+    # being read as a single continuous string.
+    speech = config.setdefault("speech", {})
+    cadence = speech.setdefault("natural_cadence", {})
+    cadence.setdefault("enabled", True)
+    cadence.setdefault("min_pause", 0.2)       # seconds — minimum inter-phrase silence
+    cadence.setdefault("max_pause", 0.6)       # seconds — maximum inter-phrase silence
+    cadence.setdefault("period_pause", 0.5)    # seconds — pause after "."
+    cadence.setdefault("ellipsis_pause", 0.7)  # seconds — pause after "..."
+    cadence.setdefault("comma_pause", 0.2)     # seconds — pause after ","
+    cadence.setdefault("speed_variation", True)   # per-phrase speed jitter (atempo)
+    cadence.setdefault("min_speed", 0.92)         # lower bound for speed multiplier
+    cadence.setdefault("max_speed", 1.08)         # upper bound for speed multiplier
+    cadence.setdefault("leading_pause", 0.3)      # silence before first phrase
+    cadence.setdefault("trailing_pause", 0.2)     # silence after last phrase
+    cadence.setdefault("postprocess", True)       # apply loudnorm + silence trim
 
     # Radio dispatch effect settings — controls the audio processing applied
     # to TTS output to simulate a police radio transmission.

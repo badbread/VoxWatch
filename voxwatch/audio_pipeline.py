@@ -1110,6 +1110,74 @@ class AudioPipeline:
 
         return success
 
+    async def generate_natural_tts(
+        self,
+        phrases: list[str],
+        output_path: str,
+    ) -> bool:
+        """Generate natural-sounding speech from a list of short phrases.
+
+        Delegates to ``voxwatch.speech.natural_cadence.generate_natural_speech``
+        to produce audio with human-like inter-phrase pauses and optional
+        per-phrase speed variation.  Falls back to a single ``generate_tts``
+        call with all phrases joined by spaces if natural cadence generation
+        fails for any reason, ensuring the pipeline is always non-fatal.
+
+        Natural cadence is only attempted when enabled in config
+        (``speech.natural_cadence.enabled`` defaults to True).  When disabled,
+        the fallback path runs immediately.
+
+        Args:
+            phrases: Ordered list of short spoken phrases.  Typically the result
+                of ``voxwatch.speech.natural_cadence.parse_ai_response`` applied
+                to the AI's structured JSON output.
+            output_path: Absolute path where the output WAV should be written.
+                The WAV is in the internal working format (44.1 kHz 16-bit mono)
+                and must be converted to the camera codec by the caller via
+                ``convert_audio``.
+
+        Returns:
+            True if audio was successfully written to ``output_path``, either
+            via natural cadence or the flat-string fallback.
+        """
+        cadence_cfg = self.config.get("speech", {}).get("natural_cadence", {})
+        enabled: bool = cadence_cfg.get("enabled", True)
+
+        if enabled and phrases:
+            try:
+                from voxwatch.speech.natural_cadence import generate_natural_speech
+                ok = await generate_natural_speech(
+                    phrases=phrases,
+                    audio_pipeline=self,
+                    output_path=output_path,
+                    config=self.config,
+                )
+                if ok:
+                    logger.info(
+                        "generate_natural_tts: natural cadence succeeded (%d phrases)",
+                        len(phrases),
+                    )
+                    return True
+                logger.warning(
+                    "generate_natural_tts: natural cadence failed — falling back to flat TTS"
+                )
+            except Exception as exc:
+                logger.warning(
+                    "generate_natural_tts: natural cadence raised %s — falling back to flat TTS",
+                    exc,
+                )
+
+        # Fallback: join all phrases into a single string and call standard TTS.
+        fallback_text = " ".join(p.strip() for p in phrases if p.strip())
+        if not fallback_text:
+            logger.error("generate_natural_tts: no usable text in phrase list")
+            return False
+
+        logger.info(
+            "generate_natural_tts: using flat-string fallback (%d chars)", len(fallback_text)
+        )
+        return await self.generate_tts(fallback_text, output_path)
+
     async def reload_tts(self, config: dict) -> None:
         """Reinitialise the TTS provider from an updated config dict.
 

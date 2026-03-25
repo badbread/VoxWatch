@@ -460,6 +460,138 @@ export interface ResponseModeConfig {
  */
 export type PersonaConfig = ResponseModeConfig;
 
+// ---------------------------------------------------------------------------
+// New structured mode system (v0.3+)
+// ---------------------------------------------------------------------------
+
+/** Audio/TTS mood and processing hints for a response mode. */
+export interface ModeToneConfig {
+  /** High-level mood string passed to expressive TTS providers (e.g. "authoritative"). */
+  mood?: string;
+  /** Playback speed relative to 1.0 (0.5–2.0). Values below 1.0 slow speech down. */
+  speed_multiplier?: number;
+  /** Whether to apply the radio bandpass/static effect for this mode. */
+  radio_effect?: boolean;
+}
+
+/** Optional per-mode TTS voice overrides. Absent fields inherit global TTS config. */
+export interface ModeVoiceConfig {
+  /** Kokoro voice ID override for this mode (e.g. "af_bella"). */
+  kokoro_voice?: string;
+  /** OpenAI TTS voice name override (e.g. "nova", "onyx"). */
+  openai_voice?: string;
+  /** ElevenLabs voice ID (UUID string) override. */
+  elevenlabs_voice?: string;
+  /** Piper model name override (e.g. "en_US-lessac-medium"). */
+  piper_model?: string;
+}
+
+/** Runtime behavioral flags that alter how the pipeline handles a mode. */
+export interface ModeBehaviorConfig {
+  /** When true, route audio through the segmented radio-dispatch pipeline. */
+  is_dispatch?: boolean;
+  /** When true, apply radio bandpass/static effect to all TTS for this mode. */
+  use_radio_effect?: boolean;
+  /** When true (dispatch only), append male-voice officer acknowledgment. */
+  officer_response?: boolean;
+  /** When true, AI prompts request JSON output rather than free text. */
+  json_ai_output?: boolean;
+  /** When true, prepend scene context to the AI prompt for this mode. */
+  scene_context_prefix?: boolean;
+}
+
+/** Configuration for a single stage within a response mode. */
+export interface ModeStageConfig {
+  /**
+   * System instruction prepended to the AI prompt for this stage.
+   * Empty string means no modification — base prompt runs unaltered.
+   */
+  prompt_modifier?: string;
+  /**
+   * Ordered list of fallback phrase strings used when AI fails.
+   * Support {variable} substitution (see AI description variables in loader.py).
+   * First entry is primary; subsequent entries are alternates.
+   */
+  templates?: string[];
+}
+
+/**
+ * A fully-defined VoxWatch response mode.
+ *
+ * Users can define custom modes under `response_modes.modes` in config.yaml.
+ * Built-in modes are always available as a fallback library.
+ *
+ * AI description variables available in templates and prompt_modifier:
+ *   {clothing_description}   — from AI vision
+ *   {location_on_property}   — from AI vision
+ *   {behavior_description}   — from AI vision
+ *   {suspect_count}          — from AI vision
+ *   {address_street}         — from config property.street
+ *   {address_full}           — from config property.full_address
+ *   {time_of_day}            — current time label (morning/evening/night)
+ *   {camera_name}            — Frigate camera name from the detection event
+ */
+export interface ResponseModeDefinition {
+  /**
+   * Unique mode identifier (e.g. "police_dispatch").
+   * Must be lowercase and underscore-separated. Required.
+   */
+  id: string;
+  /**
+   * Category grouping: "core" | "advanced" | "novelty" | "custom".
+   * Defaults to "custom" for user-defined modes.
+   */
+  category?: 'core' | 'advanced' | 'novelty' | 'custom';
+  /** Human-readable display name shown in the dashboard UI. */
+  name?: string;
+  /** One-line description of what this mode does and when to use it. */
+  description?: string;
+  /** Short phrase describing the psychological effect on an intruder. */
+  effect?: string;
+  /** Audio and TTS mood hints. */
+  tone?: ModeToneConfig;
+  /** Optional TTS voice overrides (absent = inherit global TTS settings). */
+  voice?: ModeVoiceConfig;
+  /** Runtime pipeline behavior flags. */
+  behavior?: ModeBehaviorConfig;
+  /**
+   * Stage definitions keyed by "stage1", "stage2", "stage3".
+   * Missing stage keys fall back to an empty StageConfig (no modifier, no templates).
+   */
+  stages?: {
+    stage1?: ModeStageConfig;
+    stage2?: ModeStageConfig;
+    stage3?: ModeStageConfig;
+  };
+}
+
+/**
+ * The new structured `response_modes` top-level config section.
+ *
+ * Replaces the flat `response_mode.name` single-mode approach with:
+ * - A global active mode
+ * - Per-camera overrides
+ * - User-defined custom mode library
+ */
+export interface ResponseModesConfig {
+  /**
+   * Default mode ID applied to all cameras.
+   * Falls back to the legacy `response_mode.name` if absent.
+   */
+  active_mode?: string;
+  /**
+   * Per-camera mode override map.
+   * Key: Frigate camera name. Value: mode ID.
+   * Example: { "backyard_cam": "homeowner", "front_door": "police_dispatch" }
+   */
+  camera_overrides?: Record<string, string>;
+  /**
+   * User-defined custom mode definitions.
+   * Each entry can override a built-in mode (same `id`) or add new ones.
+   */
+  modes?: ResponseModeDefinition[];
+}
+
 /** Logging configuration. */
 export interface LoggingConfig {
   /** Log level: "DEBUG" | "INFO" | "WARNING" | "ERROR". */
@@ -486,6 +618,12 @@ export interface VoxWatchConfig {
   audio: AudioConfig;
   audio_push: AudioPushConfig;
   messages: MessagesConfig;
+  /**
+   * Structured mode system (v0.3+).
+   * When present, `active_mode` and `camera_overrides` take precedence over
+   * the legacy `response_mode.name` single-key approach.
+   */
+  response_modes?: ResponseModesConfig;
   /** Response mode — controls the speaking style of deterrent messages. */
   response_mode: ResponseModeConfig;
   /**
