@@ -105,6 +105,25 @@ codebase changes.
 ### POST /api/system/mqtt-simulation
 - Publish synthetic Frigate event to MQTT
 
+### GET /api/setup/status (NO AUTH)
+- Check if config.yaml exists, which sections are configured
+- Returns: config_exists, setup_complete, frigate_configured, mqtt_configured, ai_configured, cameras_configured, frigate_host_env
+- Pre-fills frigate_host from FRIGATE_HOST env var
+- No authentication required (first-run has no API key)
+
+### POST /api/setup/probe (NO AUTH)
+- Probes Frigate + go2rtc + MQTT concurrently from provided host
+- Tries Frigate on ports 5000, 5001, 8971
+- Returns: cameras found, versions, backchannel info, MQTT reachability
+- 409 Conflict if config.yaml already exists
+- Input validation: host must match ^[a-zA-Z0-9._-]+$
+
+### POST /api/setup/generate-config (NO AUTH)
+- Builds and atomically writes config.yaml from wizard inputs
+- 409 Conflict if config.yaml already exists
+- Includes: frigate, go2rtc, mqtt, ai, tts, response_mode, cameras sections
+- Atomic write via tempfile + os.replace
+
 ### POST /api/wizard/detect
 - Probe camera backchannel capabilities
 
@@ -123,12 +142,17 @@ codebase changes.
 
 | Path | Page | Description |
 |------|------|-------------|
+| /setup | SetupPage | Full-screen first-run wizard (no sidebar). Auto-redirect when no config.yaml |
 | / | DashboardPage | System hero + camera grid + activity + quick actions |
 | /cameras | CamerasPage | Camera hub with detail panel, deep-link via ?selected= |
 | /config | ConfigPage | Form Editor (6 tabs) + Advanced YAML (Monaco) |
 | /tests | TestsPage | 5 sections: Audio, TTS, Camera, MQTT Sim, Logs |
 | /wizard | WizardPage | 7-step camera setup wizard |
 | * | NotFoundPage | 404 |
+
+**SetupGuard:** All routes except /setup are wrapped in SetupGuard. If config.yaml doesn't exist, auto-redirects to /setup.
+
+**Setup wizard steps (9):** welcome → frigate → discovery → mqtt → ai → tts → response_mode → cameras → review
 
 ---
 
@@ -156,8 +180,15 @@ codebase changes.
 
 ---
 
-## Section 5: Detection Pipeline
+## Section 5: Service Startup & Detection Pipeline
 
+### Service Startup
+- If config.yaml missing: service polls every 5s (does NOT crash)
+- Logs: "Waiting for setup. Open the dashboard to configure VoxWatch."
+- When config appears: loads and starts normally
+- `load_config_or_none()` returns None instead of sys.exit
+
+### Detection Pipeline
 ```
 MQTT event (type=new, label=person)
   → Guard: active_hours → Guard: cooldown → Guard: min_score

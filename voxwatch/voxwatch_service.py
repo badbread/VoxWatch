@@ -47,7 +47,7 @@ from typing import Any, Optional
 
 import paho.mqtt.client as mqtt
 
-from voxwatch.config import load_config, reload_config
+from voxwatch.config import load_config, load_config_or_none, reload_config
 from voxwatch.audio_pipeline import AudioPipeline
 from voxwatch.ai_vision import (
     DEFAULT_MESSAGES,
@@ -1741,8 +1741,20 @@ def main() -> None:
         stream=sys.stdout,
     )
 
-    # Load and validate config — exits with code 1 on any error.
-    config = load_config(args.config)
+    # Attempt to load config — if it doesn't exist yet, wait for the setup
+    # wizard to write it.  This lets the container start cleanly before
+    # config.yaml has been created via the first-run web wizard.
+    config = load_config_or_none(args.config)
+    if config is None:
+        logger.info(
+            "config.yaml not found at %s — waiting for setup. "
+            "Open the VoxWatch Dashboard at http://your-host:33344 to complete first-run setup.",
+            args.config,
+        )
+        while config is None:
+            time.sleep(5)
+            config = load_config_or_none(args.config)
+        logger.info("config.yaml detected — starting VoxWatch service.")
 
     # Re-configure logging with values from the loaded config.
     # Rotation settings prevent unbounded disk growth — configurable in config.yaml.

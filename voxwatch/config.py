@@ -14,7 +14,7 @@ import logging
 import os
 import re
 import sys
-from typing import Any
+from typing import Any, Optional
 
 import yaml
 
@@ -354,6 +354,47 @@ def load_config(config_path: str) -> dict:
     logger.info("Configuration loaded from %s", config_path)
     logger.info("Monitored cameras: %s",
                 [n for n, c in config["cameras"].items() if c.get("enabled", True)])
+
+    return config
+
+
+def load_config_or_none(config_path: str) -> Optional[dict]:
+    """Load and validate config without raising or calling sys.exit on failure.
+
+    Identical to ``load_config`` but returns ``None`` instead of exiting the
+    process when the config file is missing or invalid.  This is the right
+    function to use in polling loops that wait for a config to be written (e.g.
+    the first-run setup wizard flow).
+
+    Unlike ``reload_config``, this function never raises — it swallows all
+    errors and returns ``None`` so the caller can simply check truthiness.
+
+    Args:
+        config_path: Path to the config.yaml file.
+
+    Returns:
+        Fully resolved config dict ready for use by the service, or ``None``
+        if the file is absent or unparseable.
+    """
+    if not os.path.exists(config_path):
+        # File not yet written — normal during first-run setup.
+        return None
+
+    with open(config_path, "r") as f:
+        try:
+            raw_config = yaml.safe_load(f) or {}
+        except yaml.YAMLError as e:
+            logger.warning("Config file exists but could not be parsed: %s", e)
+            return None
+
+    config = _substitute_env_vars(raw_config)
+    config = _apply_defaults(config)
+
+    errors = validate_config(config)
+    if errors:
+        for err in errors:
+            logger.warning("Config validation error (will retry): %s", err)
+        return None
 
     return config
 

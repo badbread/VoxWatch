@@ -53,6 +53,7 @@ from backend.routers import (
     audio,
     cameras,
     config_editor,
+    setup,
     status,
     system,
     wizard,
@@ -363,6 +364,11 @@ app.include_router(cameras.router, prefix=api_prefix, dependencies=[api_auth])
 app.include_router(audio.router, prefix=api_prefix, dependencies=[api_auth])
 app.include_router(system.router, prefix=api_prefix, dependencies=[api_auth])
 app.include_router(wizard.router, prefix=api_prefix, dependencies=[api_auth])
+
+# No auth — first-run setup has no API key configured yet.
+# These three endpoints must be reachable before config.yaml exists so the
+# web wizard can probe services and write the initial configuration.
+app.include_router(setup.router, prefix=api_prefix)
 
 
 # ── Static files (React SPA) ──────────────────────────────────────────────────
