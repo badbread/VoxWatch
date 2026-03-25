@@ -1,0 +1,11 @@
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges">
+<rect width="200" height="200" fill="#FFFFFF"/>
+<g stroke="#1F2937" stroke-width="4" fill="none" stroke-linecap="square">
+  <path d="M56 56 H88 M56 56 V88"/>
+  <path d="M144 56 H112 M144 56 V88"/>
+  <path d="M56 144 H88 M56 144 V112"/>
+  <path d="M144 144 H112 M144 144 V112"/>
+</g>
+<polyline points="72,100 84,100 92,84 100,116 108,96 116,104 128,100"
+          fill="none" stroke="#F59E0B" stroke-width="4" stroke-linecap="square" stroke-linejoin="miter"/>
+</svg>

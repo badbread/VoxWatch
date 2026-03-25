@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git config:*)",
+      "Bash(grep -r \"sk-\\\\|openai\\\\|api.key\\\\|secret\\\\|password\\\\|Bearer\" /volume1/ai/voxwatch --include=*.py --exclude-dir=node_modules --exclude-dir=.git)",
+      "Bash(find /volume1/ai/voxwatch -type f -name \"*.py\" -exec grep -l \"^#\" {})",
+      "Bash(find /volume1/ai/voxwatch -type f \\\\\\(-name *.bin -o -name *.pkl -o -name *.model -o -name *.onnx \\\\\\))",
+      "Bash(git rev-list:*)",
+      "Bash(git cat-file:*)",
+      "Bash(sort -rnk2)",
+      "Bash(grep -r \"TODO\\\\|FIXME\\\\|HACK\\\\|XXX\\\\|BROKEN\\\\|BUG\\\\|TEMP\\\\|DEBUG\" /volume1/ai/voxwatch --include=*.py --include=*.ts --include=*.tsx --include=*.js --exclude-dir=node_modules --exclude-dir=.git)",
+      "Bash(grep -r \"localhost\\\\|127.0.0.1\\\\|192.168\\\\|10\\\\.\\\\|172\\\\.\" /volume1/ai/voxwatch --include=*.py --include=*.ts --include=*.tsx --include=*.js --exclude-dir=node_modules --exclude-dir=.git)",
+      "Bash(grep -n \"TODO\\\\|FIXME\\\\|XXX\\\\|HACK\\\\|temp\\\\|dummy\\\\|placeholder\" /volume1/ai/voxwatch/voxwatch/*.py /volume1/ai/voxwatch/dashboard/backend/main.py)",
+      "Bash(find /volume1/ai/voxwatch -type f -name *test* ! -path */node_modules/* ! -path */.git/*)",
+      "Bash(grep -r \"password\\\\|passwd\\\\|secret\\\\|Bearer\\\\|API\" /volume1/ai/voxwatch/tests/ --include=*.py)",
+      "Bash(find /volume1/ai/voxwatch -type d -name __pycache__ ! -path */node_modules/*)",
+      "Bash(grep -r \"\\\\.env\\\\|environment.*api\\\\|SECRET\\\\|CREDENTIALS\" /volume1/ai/voxwatch --include=*.md --include=*.txt)",
+      "Bash(git -C /volume1/ai/voxwatch log --oneline)",
+      "Bash(grep -r \"admin\\\\|password\\\\|credentials\\\\|key\\\\|token\" /volume1/ai/voxwatch --include=*.yaml --include=*.yml ! -path */node_modules/*)",
+      "Bash(grep -E \"\\\\.md$|\\\\.yaml$|\\\\.yml$|Dockerfile|docker-compose\")",
+      "Bash(find /volume1/ai/voxwatch -type f \\\\\\(-name *.py -o -name *.ts -o -name *.tsx -o -name *.js -o -name *.json -o -name *.yml -o -name *.yaml -o -name Dockerfile -o -name entrypoint.sh \\\\\\))",
+      "Bash(grep:*)",
+      "Bash(find /volume1/ai/voxwatch -name .env* -o -name secrets* -o -name *secret* -o -name *.key -o -name *.pem)",
+      "Bash(find /volume1/ai/voxwatch/voxwatch -name \"*.py\" -exec grep -l \"^#.*=\" {})",
+      "Bash(git commit:*)",
+      "Bash(git reflog:*)",
+      "Bash(git gc:*)",
+      "Bash(git remote:*)"
+    ]
+  }
+}

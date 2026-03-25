@@ -1,0 +1,676 @@
+"""preview_api.py — Lightweight HTTP API for audio preview generation.
+
+Runs alongside the main VoxWatch MQTT service on a dedicated port (default
+8892).  The dashboard proxies preview requests here so all audio generation
+code — TTS, radio effects, dispatch composition — stays in one place and is
+never duplicated.
+
+Architecture::
+
+    Browser → Dashboard (port 33344) → VoxWatch API (port 8892) → WAV response
+
+Endpoints:
+    POST /api/preview               — Generate a full audio preview using VoxWatch's actual
+                                      TTS pipeline, response modes, and dispatch system.
+                                      For dispatch modes the full experience is generated:
+                                      channel intro → chatter → dispatch segments → officer.
+                                      For all other modes, clean TTS is returned.
+    POST /api/preview/generate-intro — Generate a dispatch channel intro from text using
+                                      any configured TTS provider and optionally save it
+                                      to /data/audio/dispatch_intro_cached.wav so it is
+                                      reused by the dispatch pipeline automatically.
+    GET  /api/health                — Simple health check ({"status": "ok", "version": ...}).
+
+The server runs inside the same asyncio event loop as the main service so it
+shares the AudioPipeline instance without any thread-safety concerns.  Every
+generated preview is written to a temp file, read back, then deleted so the
+serve directory is not polluted.
+
+Non-fatal design:
+    If the server fails to bind (port conflict, permissions), the failure is
+    logged and the main service continues.  ``start()`` never raises; callers
+    should check the return value of ``start()`` if they need to know whether
+    the API is up.
+"""
+
+import json
+import logging
+import os
+import tempfile
+import time
+from typing import Optional
+
+from aiohttp import web
+
+logger = logging.getLogger("voxwatch.preview_api")
+
+# Service version — keep in sync with voxwatch_service.SERVICE_VERSION.
+_VERSION = "0.2.0"
+
+# Sample AI JSON used when generating dispatch previews.  These values produce
+# a realistic 3-segment dispatch call that exercises the full pipeline.
+_SAMPLE_DISPATCH_AI = json.dumps({
+    "suspect_count": "one",
+    "description": "male, dark hoodie, medium build, carrying a backpack",
+    "location": "near the front entrance approaching from the driveway",
+})
+
+# Default preview message for non-dispatch modes when the caller sends no
+# custom message.  Realistic enough to give a useful impression of the voice.
+_DEFAULT_PREVIEW_MESSAGE = (
+    "Attention — this property is under active surveillance. "
+    "You have been identified on camera. Please leave the area immediately."
+)
+
+
+class PreviewAPI:
+    """Small aiohttp HTTP server that generates audio previews on demand.
+
+    The server reuses the live ``AudioPipeline`` instance so previews are
+    synthesised with the exact same TTS provider, voices, and radio effects
+    that are used during real detection events.
+
+    Lifecycle:
+        1. Construct with the running ``AudioPipeline`` and the current config.
+        2. Await ``start(port)`` after the audio pipeline is initialised.
+        3. Call ``update_config(new_config)`` on every hot-reload so previews
+           always reflect the current dispatch address, agency, etc.
+        4. Await ``stop()`` during graceful shutdown to release the port.
+
+    Attributes:
+        _audio: The shared ``AudioPipeline`` instance.
+        _config: Current VoxWatch config dict (updated via ``update_config``).
+        _app: The aiohttp ``web.Application`` instance.
+        _runner: ``web.AppRunner`` created in ``start()``.
+    """
+
+    def __init__(self, audio_pipeline, config: dict) -> None:
+        """Initialise the preview API.
+
+        Args:
+            audio_pipeline: Live ``AudioPipeline`` instance from the main
+                service.  Used for TTS generation, audio conversion, and the
+                radio effect.  Must already be initialised (``initialize()``
+                called) before any preview requests arrive.
+            config: The full VoxWatch config dict.  A reference is kept so
+                that ``update_config`` can swap it atomically on hot-reload.
+        """
+        self._audio = audio_pipeline
+        self._config = config
+
+        self._app = web.Application()
+        self._app.router.add_post("/api/preview", self._handle_preview)
+        self._app.router.add_post("/api/preview/generate-intro", self._handle_generate_intro)
+        self._app.router.add_get("/api/health", self._handle_health)
+
+        self._runner: Optional[web.AppRunner] = None
+
+    # ── Lifecycle ─────────────────────────────────────────────────────────────
+
+    async def start(self, port: int = 8892) -> bool:
+        """Bind the HTTP server and begin accepting requests.
+
+        Binds to ``0.0.0.0`` so the dashboard container can reach it.  The
+        method is non-fatal: any ``OSError`` (port conflict, permission denied)
+        is caught, logged, and ``False`` is returned so the main service can
+        continue without the preview API.
+
+        Args:
+            port: TCP port to listen on.  Default 8892.
+
+        Returns:
+            ``True`` if the server bound and started successfully.
+            ``False`` if startup failed (port conflict, etc.).
+        """
+        try:
+            self._runner = web.AppRunner(self._app, access_log=None)
+            await self._runner.setup()
+            site = web.TCPSite(self._runner, "0.0.0.0", port)
+            await site.start()
+            logger.info("Preview API listening on 0.0.0.0:%d", port)
+            return True
+        except OSError as exc:
+            logger.error(
+                "Preview API failed to start on port %d: %s — "
+                "preview functionality will be unavailable.",
+                port,
+                exc,
+            )
+            # Clean up the runner so stop() is a no-op.
+            if self._runner:
+                try:
+                    await self._runner.cleanup()
+                except Exception:
+                    pass
+                self._runner = None
+            return False
+        except Exception as exc:
+            logger.error(
+                "Preview API unexpected startup error: %s — "
+                "preview functionality will be unavailable.",
+                exc,
+            )
+            self._runner = None
+            return False
+
+    async def stop(self) -> None:
+        """Release the server port and shut down the aiohttp runner.
+
+        Safe to call even if ``start()`` failed or was never called.
+        """
+        if self._runner is not None:
+            await self._runner.cleanup()
+            self._runner = None
+            logger.info("Preview API stopped.")
+
+    def update_config(self, config: dict) -> None:
+        """Swap the config dict used for subsequent preview requests.
+
+        Called by ``VoxWatchService._reload_config()`` after each hot-reload
+        so previews always reflect the current dispatch address, agency,
+        callsign, and TTS settings.
+
+        Args:
+            config: New VoxWatch config dict (already validated).
+        """
+        self._config = config
+        logger.debug("Preview API config updated.")
+
+    # ── Route handlers ────────────────────────────────────────────────────────
+
+    async def _handle_health(self, request: web.Request) -> web.Response:
+        """GET /api/health — Return service health and version.
+
+        Args:
+            request: Incoming aiohttp request (body is not read).
+
+        Returns:
+            JSON response ``{"status": "ok", "version": "<version>"}``.
+        """
+        return web.json_response({"status": "ok", "version": _VERSION})
+
+    async def _handle_preview(self, request: web.Request) -> web.Response:
+        """POST /api/preview — Generate and return an audio preview as WAV.
+
+        Reads a JSON body with the following optional fields:
+
+        .. code-block:: json
+
+            {
+                "response_mode": "police_dispatch",
+                "message": "optional custom text",
+                "voice": "am_fenrir",
+                "provider": "kokoro",
+                "speed": 1.0
+            }
+
+        When ``response_mode`` names a dispatch mode the full dispatch
+        sequence is generated (channel intro + chatter + dispatch segments +
+        officer response).  For all other modes, clean TTS is returned.
+
+        The ``voice``, ``provider``, and ``speed`` fields are applied to the
+        active TTS config before generating so the preview reflects any
+        pending changes the user has made in the UI but not yet saved.
+
+        Args:
+            request: Incoming aiohttp POST request with a JSON body.
+
+        Returns:
+            Raw WAV ``web.Response`` with ``Content-Type: audio/wav`` and
+            ``X-Generation-Time-Ms`` header on success, or a JSON error
+            response with status 400/500 on failure.
+        """
+        try:
+            body: dict = await request.json()
+        except Exception:
+            return web.json_response(
+                {"error": "Request body must be valid JSON."},
+                status=400,
+            )
+
+        response_mode: str = str(body.get("response_mode", "standard")).strip()
+        custom_message: str = str(body.get("message", "")).strip()
+
+        # Optional TTS overrides from the UI (voice / provider / speed).
+        # We apply these to a shallow copy of the config so the live pipeline
+        # is not mutated.  The TTS factory reads these keys at call time.
+        tts_override: dict = {}
+        if "voice" in body:
+            tts_override["voice"] = str(body["voice"]).strip()
+        if "provider" in body:
+            tts_override["provider"] = str(body["provider"]).strip()
+        if "speed" in body:
+            try:
+                tts_override["speed"] = float(body["speed"])
+            except (TypeError, ValueError):
+                pass
+
+        # Build a config snapshot that includes any TTS overrides.
+        preview_config = self._build_preview_config(tts_override)
+
+        start_ts = time.monotonic()
+
+        # Dispatch modes go through the full compose_dispatch_audio path.
+        from voxwatch.radio_dispatch import DISPATCH_MODES
+
+        if response_mode in DISPATCH_MODES:
+            wav_path = await self._generate_dispatch_preview(
+                preview_config, response_mode, custom_message
+            )
+        else:
+            wav_path = await self._generate_tts_preview(
+                preview_config, response_mode, custom_message
+            )
+
+        if not wav_path or not os.path.exists(wav_path):
+            return web.json_response(
+                {"error": "Preview generation failed. Check VoxWatch logs for details."},
+                status=500,
+            )
+
+        elapsed_ms = int((time.monotonic() - start_ts) * 1000)
+
+        try:
+            with open(wav_path, "rb") as fh:
+                wav_bytes = fh.read()
+        except OSError as exc:
+            logger.error("Preview API: could not read output WAV: %s", exc)
+            return web.json_response(
+                {"error": "Could not read generated audio file."},
+                status=500,
+            )
+        finally:
+            # Always delete the temp file — callers never reuse it.
+            try:
+                os.unlink(wav_path)
+            except OSError:
+                pass
+
+        logger.info(
+            "Preview generated: mode=%s elapsed_ms=%d bytes=%d",
+            response_mode,
+            elapsed_ms,
+            len(wav_bytes),
+        )
+
+        return web.Response(
+            body=wav_bytes,
+            content_type="audio/wav",
+            headers={"X-Generation-Time-Ms": str(elapsed_ms)},
+        )
+
+    async def _handle_generate_intro(self, request: web.Request) -> web.Response:
+        """POST /api/preview/generate-intro — Generate a dispatch channel intro WAV.
+
+        Synthesises a custom dispatch intro phrase using the requested TTS
+        provider/voice, streams the resulting WAV back to the caller for
+        in-browser playback, and optionally persists it to
+        ``/data/audio/dispatch_intro_cached.wav`` so the live dispatch
+        pipeline reuses it automatically on the next detection event (Priority
+        2 in ``generate_channel_intro``).
+
+        Request body (JSON):
+
+        .. code-block:: json
+
+            {
+                "text":     "Connecting to County Sheriff dispatch frequency.",
+                "provider": "elevenlabs",
+                "voice":    "pNInz6obpgDQGcFmaJgB",
+                "speed":    1.0,
+                "save":     true
+            }
+
+        ``text`` — the phrase to synthesise.  Supports the ``{agency}``
+            template token which is substituted with the configured agency
+            name from the current config.  Required.
+
+        ``provider`` — TTS provider to use: ``"kokoro"``, ``"elevenlabs"``,
+            ``"openai"``, ``"cartesia"``, ``"piper"``, ``"espeak"``.
+            Defaults to the currently configured provider when omitted.
+
+        ``voice`` — provider-specific voice identifier.  Defaults to the
+            provider's currently configured voice when omitted.
+
+        ``speed`` — speed multiplier (float, default 1.0).
+
+        ``save`` — when ``true``, the generated audio is also written to
+            ``/data/audio/dispatch_intro_cached.wav`` so it persists across
+            requests and is used automatically by the dispatch pipeline.
+            Defaults to ``false``.
+
+        Response:
+            Raw WAV bytes with ``Content-Type: audio/wav`` on success.  The
+            ``X-Generation-Time-Ms`` header reports synthesis latency.  On
+            failure a JSON error response is returned.
+
+        Args:
+            request: Incoming aiohttp POST request with JSON body.
+
+        Returns:
+            ``web.Response`` with WAV body on success or JSON error on
+            failure.
+        """
+        try:
+            body: dict = await request.json()
+        except Exception:
+            return web.json_response(
+                {"error": "Request body must be valid JSON."},
+                status=400,
+            )
+
+        text: str = str(body.get("text", "")).strip()
+        if not text:
+            return web.json_response(
+                {"error": "\"text\" field is required and must be non-empty."},
+                status=400,
+            )
+
+        # Substitute {agency} token using the live config.
+        dispatch_cfg: dict = (
+            self._config.get("response_mode", self._config.get("persona", {}))
+            .get("dispatch", {})
+        )
+        agency: str = dispatch_cfg.get("agency", "").strip()
+        try:
+            text = text.format(agency=agency)
+        except (KeyError, ValueError):
+            pass  # Malformed template — use verbatim.
+
+        # TTS overrides from the request body.
+        tts_override: dict = {}
+        if "provider" in body:
+            tts_override["provider"] = str(body["provider"]).strip()
+        if "voice" in body:
+            tts_override["voice"] = str(body["voice"]).strip()
+        if "speed" in body:
+            try:
+                tts_override["speed"] = float(body["speed"])
+            except (TypeError, ValueError):
+                pass
+
+        save: bool = bool(body.get("save", False))
+
+        preview_config = self._build_preview_config(tts_override)
+
+        start_ts = time.monotonic()
+
+        try:
+            fd, tmp_path = tempfile.mkstemp(
+                suffix=".wav", prefix="voxwatch_intro_gen_"
+            )
+            os.close(fd)
+        except OSError as exc:
+            logger.error("generate-intro: could not create temp file: %s", exc)
+            return web.json_response(
+                {"error": "Server error: could not create temp file."},
+                status=500,
+            )
+
+        # Swap config so generate_tts picks up any voice/provider overrides.
+        original_config = self._audio.config
+        try:
+            self._audio.config = preview_config
+            success = await self._audio.generate_tts(text, tmp_path)
+        finally:
+            self._audio.config = original_config
+
+        if not success or not os.path.exists(tmp_path):
+            logger.error("generate-intro: TTS generation failed for text: %s", text[:80])
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            return web.json_response(
+                {"error": "TTS generation failed. Check VoxWatch logs for details."},
+                status=500,
+            )
+
+        # Optionally persist to the cached intro path for live pipeline reuse.
+        if save:
+            cached_intro_dir = "/data/audio"
+            cached_intro_path = "/data/audio/dispatch_intro_cached.wav"
+            try:
+                os.makedirs(cached_intro_dir, exist_ok=True)
+                import shutil as _shutil
+                _shutil.copy2(tmp_path, cached_intro_path)
+                logger.info(
+                    "generate-intro: saved to %s (%d bytes)",
+                    cached_intro_path,
+                    os.path.getsize(cached_intro_path),
+                )
+            except OSError as exc:
+                logger.warning(
+                    "generate-intro: could not save cached intro to %s: %s "
+                    "— preview still returned.",
+                    cached_intro_path,
+                    exc,
+                )
+
+        elapsed_ms = int((time.monotonic() - start_ts) * 1000)
+
+        try:
+            with open(tmp_path, "rb") as fh:
+                wav_bytes = fh.read()
+        except OSError as exc:
+            logger.error("generate-intro: could not read output WAV: %s", exc)
+            return web.json_response(
+                {"error": "Could not read generated audio file."},
+                status=500,
+            )
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+        logger.info(
+            "generate-intro: synthesised %d bytes in %d ms (save=%s)",
+            len(wav_bytes),
+            elapsed_ms,
+            save,
+        )
+
+        return web.Response(
+            body=wav_bytes,
+            content_type="audio/wav",
+            headers={
+                "X-Generation-Time-Ms": str(elapsed_ms),
+                "X-Intro-Saved": "true" if save else "false",
+            },
+        )
+
+    # ── Preview generators ────────────────────────────────────────────────────
+
+    async def _generate_dispatch_preview(
+        self,
+        config: dict,
+        response_mode: str,
+        custom_message: str,
+    ) -> Optional[str]:
+        """Generate the full dispatch audio sequence and return the WAV path.
+
+        Calls the same ``segment_dispatch_message`` → ``compose_dispatch_audio``
+        pipeline used during live detection events.  The generated segments use
+        sample AI JSON so the preview demonstrates a realistic 3-segment
+        dispatch call with the configured address, agency, and callsign.
+
+        Steps performed:
+          1. Build sample AI JSON describing a generic intruder.
+          2. Call ``segment_dispatch_message(ai_json, "stage2", config)`` to
+             produce the ordered list of dispatch phrases.
+          3. Call ``compose_dispatch_audio(segments, output_path, audio_pipeline,
+             config, "preview")`` which handles channel intro generation,
+             per-segment TTS + radio effect, squelch pauses, and officer
+             response — identical to the live pipeline.
+          4. Return the path to the final WAV, or ``None`` on failure.
+
+        Args:
+            config: Preview config snapshot (may contain TTS overrides).
+            response_mode: Active dispatch mode name (e.g. "police_dispatch").
+            custom_message: Caller-supplied text.  When non-empty, used as a
+                single dispatch segment instead of the sample AI JSON so the
+                user can hear their exact wording through the radio effect.
+
+        Returns:
+            Absolute path to the composed WAV file, or ``None`` if composition
+            failed.  The caller is responsible for deleting the file.
+        """
+        from voxwatch.radio_dispatch import (
+            segment_dispatch_message,
+            compose_dispatch_audio,
+        )
+
+        # Choose dispatch segments: caller text gets wrapped in a minimal JSON
+        # so segment_dispatch_message can build a proper dispatch call from it.
+        # Falling back to the sample AI JSON gives the most realistic preview.
+        if custom_message:
+            # Wrap the caller's custom text as the "description" field so it
+            # appears in segment 2 ("Suspect described as …").  The location
+            # and count fields use generic defaults.
+            ai_json = json.dumps({
+                "suspect_count": "one",
+                "description": custom_message,
+                "location": "near the front entrance",
+            })
+        else:
+            ai_json = _SAMPLE_DISPATCH_AI
+
+        segments = segment_dispatch_message(ai_json, stage="stage2", config=config)
+        if not segments:
+            logger.error("Preview API: segment_dispatch_message returned empty list")
+            return None
+
+        logger.debug(
+            "Preview API: dispatch preview — %d segment(s) for mode '%s'",
+            len(segments),
+            response_mode,
+        )
+
+        # Write to a named temp file so compose_dispatch_audio has a stable path.
+        # We do not use TemporaryDirectory here because compose_dispatch_audio
+        # manages its own internal temp files; we only need the final output path.
+        try:
+            fd, output_path = tempfile.mkstemp(
+                suffix=".wav", prefix="voxwatch_preview_dispatch_"
+            )
+            os.close(fd)
+        except OSError as exc:
+            logger.error("Preview API: could not create temp file: %s", exc)
+            return None
+
+        composed = await compose_dispatch_audio(
+            segments=segments,
+            output_path=output_path,
+            audio_pipeline=self._audio,
+            config=config,
+            stage_label="preview",
+        )
+
+        if composed and os.path.exists(composed):
+            return composed
+
+        # compose_dispatch_audio failed — clean up the empty temp file.
+        try:
+            os.unlink(output_path)
+        except OSError:
+            pass
+        return None
+
+    async def _generate_tts_preview(
+        self,
+        config: dict,
+        response_mode: str,
+        custom_message: str,
+    ) -> Optional[str]:
+        """Generate a clean TTS preview for non-dispatch response modes.
+
+        Uses ``AudioPipeline.generate_tts`` directly.  No radio effects are
+        applied — this matches what the user hears during a real detection event
+        for non-dispatch modes (radio processing only happens for dispatch).
+
+        If a custom message was supplied it is used verbatim.  Otherwise a
+        generic deterrent message is generated.
+
+        Args:
+            config: Preview config snapshot (may contain TTS overrides).
+            response_mode: Active response mode name (used for log context).
+            custom_message: Caller-supplied text.  When non-empty, used
+                directly for TTS.
+
+        Returns:
+            Absolute path to the generated WAV file, or ``None`` on failure.
+            The caller is responsible for deleting the file.
+        """
+        message = custom_message or _DEFAULT_PREVIEW_MESSAGE
+
+        logger.debug(
+            "Preview API: TTS preview — mode='%s' message_len=%d",
+            response_mode,
+            len(message),
+        )
+
+        try:
+            fd, output_path = tempfile.mkstemp(
+                suffix=".wav", prefix="voxwatch_preview_tts_"
+            )
+            os.close(fd)
+        except OSError as exc:
+            logger.error("Preview API: could not create temp file: %s", exc)
+            return None
+
+        # Temporarily swap the pipeline's config so generate_tts picks up any
+        # voice/provider overrides the UI sent.  We swap back immediately after
+        # the call so the live pipeline is never left in an altered state.
+        original_config = self._audio.config
+        try:
+            self._audio.config = config
+            success = await self._audio.generate_tts(message, output_path)
+        finally:
+            self._audio.config = original_config
+
+        if success and os.path.exists(output_path):
+            return output_path
+
+        logger.error(
+            "Preview API: generate_tts failed for mode '%s'", response_mode
+        )
+        try:
+            os.unlink(output_path)
+        except OSError:
+            pass
+        return None
+
+    # ── Helpers ───────────────────────────────────────────────────────────────
+
+    def _build_preview_config(self, tts_overrides: dict) -> dict:
+        """Build a shallow config copy with TTS overrides applied.
+
+        The copy is shallow at the top level but replaces the ``tts`` section
+        with a merged dict so the TTS factory sees any voice/provider/speed
+        changes the UI sent without mutating the live config.
+
+        Args:
+            tts_overrides: Dict of TTS field overrides.  Recognised keys:
+                ``voice``, ``provider``, ``speed``.  Empty dict is a no-op.
+
+        Returns:
+            New config dict.  The ``tts`` sub-dict is a fresh dict (not a
+            reference to the original) when overrides are present; all other
+            top-level sections point to the same objects as ``self._config``.
+        """
+        if not tts_overrides:
+            return self._config
+
+        new_config = dict(self._config)
+        new_tts = dict(self._config.get("tts", {}))
+
+        if "voice" in tts_overrides:
+            new_tts["voice"] = tts_overrides["voice"]
+        if "provider" in tts_overrides:
+            new_tts["provider"] = tts_overrides["provider"]
+        if "speed" in tts_overrides:
+            new_tts["speed"] = tts_overrides["speed"]
+
+        new_config["tts"] = new_tts
+        return new_config

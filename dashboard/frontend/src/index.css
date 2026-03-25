@@ -1,0 +1,107 @@
+/* Tailwind CSS directives */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---------------------------------------------------------------------------
+ * Custom base styles
+ * Applies system font stack and smooth colour transitions for dark mode.
+ * --------------------------------------------------------------------------- */
+
+@layer base {
+  :root {
+    color-scheme: light dark;
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html {
+    @apply antialiased;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    /* Prevent layout shift from scrollbar appearing / disappearing */
+    scrollbar-gutter: stable;
+  }
+
+  body {
+    @apply bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-gray-100;
+    margin: 0;
+    padding: 0;
+  }
+
+  /* Smooth dark mode transition — applies to backgrounds and borders only */
+  body,
+  .dark body {
+    transition: background-color 150ms ease, color 150ms ease;
+  }
+
+  /* Focus ring reset — rely on explicit focus-visible utilities */
+  :focus:not(:focus-visible) {
+    outline: none;
+  }
+
+  /* Custom scrollbar for dark mode (Webkit) */
+  ::-webkit-scrollbar {
+    @apply w-1.5 h-1.5;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-gray-300 dark:bg-gray-700;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-gray-400 dark:bg-gray-600;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Component layer
+ * --------------------------------------------------------------------------- */
+
+@layer components {
+  /* Native <dialog> reset */
+  dialog {
+    margin: auto;
+    padding: 0;
+  }
+  dialog::backdrop {
+    /* Handled via Tailwind backdrop: modifier on the dialog element */
+  }
+
+  /* Recharts dark mode colour overrides — targets SVG text */
+  .dark .recharts-text {
+    fill: #9ca3af; /* gray-400 */
+  }
+  .dark .recharts-cartesian-grid line {
+    stroke: #1f2937; /* gray-800 */
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Utility layer — custom animation helpers not in Tailwind's defaults
+ * --------------------------------------------------------------------------- */
+
+@layer utilities {
+  .line-clamp-1 {
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 1;
+  }
+  .line-clamp-2 {
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+  .line-clamp-3 {
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+  }
+}

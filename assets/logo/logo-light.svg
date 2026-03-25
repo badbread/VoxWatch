@@ -1,0 +1,15 @@
+<svg width="600" height="200" viewBox="0 0 600 200" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges">
+<rect width="600" height="200" fill="#FFFFFF"/>
+<g stroke="#1F2937" stroke-width="4" fill="none" stroke-linecap="square">
+  <!-- detection box corners (pixel-aligned) -->
+  <path d="M96 72 H128 M96 72 V104"/>
+  <path d="M168 72 H136 M168 72 V104"/>
+  <path d="M96 128 H128 M96 128 V96"/>
+  <path d="M168 128 H136 M168 128 V96"/>
+</g>
+<!-- waveform shaped as subtle V -->
+<polyline points="108,100 120,100 128,84 136,116 144,96 152,104 160,100"
+          fill="none" stroke="#F59E0B" stroke-width="4" stroke-linecap="square" stroke-linejoin="miter"/>
+<!-- wordmark -->
+<text x="220" y="112" font-family="JetBrains Mono, ui-monospace, monospace" font-size="36" letter-spacing="1" fill="#1F2937">voxwatch</text>
+</svg>

@@ -1,0 +1,28 @@
+# Ruff linter configuration for VoxWatch
+# https://docs.astral.sh/ruff/
+
+target-version = "py311"
+line-length = 100
+
+[lint]
+# Start with a reasonable set — not too strict for contributors
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # bugbear
+    "SIM",  # simplify
+]
+ignore = [
+    "E501",   # line too long — handled by formatter
+    "B008",   # function call in default arg — common in FastAPI
+    "SIM108", # ternary operator — readability preference
+]
+
+[lint.isort]
+known-first-party = ["voxwatch"]
+
+[format]
+quote-style = "double"
+indent-style = "space"

@@ -1,0 +1,56 @@
+# VoxWatch Docker Compose — Portainer Stack Deployment
+#
+# DEPLOYMENT: This file is the TEMPLATE that goes in the public repo.
+# For actual deployment, copy to your-nas and fill in the environment variables.
+# See docs/DEPLOYMENT.md for step-by-step Portainer instructions.
+#
+# ALL environment variables MUST be inline (Portainer doesn't handle env_file).
+
+# version key removed — deprecated in modern Docker Compose
+
+services:
+  voxwatch:
+    container_name: voxwatch
+    image: voxwatch:latest
+    restart: unless-stopped
+
+    # Host networking so we can reach go2rtc at localhost:1984
+    # and Frigate at localhost:5000, MQTT at localhost:1883
+    # (all run on the same Docker LXC host)
+    network_mode: host
+
+    # Resource limits — VoxWatch is lightweight, TTS is the heaviest operation
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 2.0
+
+    # Docker log rotation — prevents container logs from filling the disk.
+    # Docker stores stdout/stderr in JSON files under /var/lib/docker/containers/.
+    # Without limits these grow unbounded. 10 MB x 3 files = 30 MB max per container.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    environment:
+      # API keys can be entered directly in the web dashboard (recommended)
+      # OR set here as env vars and use ${VAR_NAME} syntax in config.yaml.
+      # Uncomment only if you prefer the env var approach:
+      # - "GEMINI_API_KEY=your-key-here"
+      # - "OPENAI_API_KEY=your-key-here"
+      # - "ELEVENLABS_API_KEY=your-key-here"
+      # - "DASHBOARD_API_KEY=your-token-here"
+
+      # Python settings
+      - "PYTHONDONTWRITEBYTECODE=1"
+      - "PYTHONUNBUFFERED=1"
+      - "TZ=America/Los_Angeles"
+
+    volumes:
+      # Config file — mount your customized config.yaml
+      # Adjust the left side to your host path
+      - ./config:/config
+
+      # Persistent data (audio cache, logs)
+      - ./data:/data
