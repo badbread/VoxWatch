@@ -114,8 +114,7 @@ export function SupportCard() {
 
           {/* Body */}
           <p className="mt-0.5 text-sm text-amber-700 dark:text-amber-400">
-            If this made your setup more powerful (or just more fun), consider supporting
-            development.
+            If this made your setup feel smarter — consider supporting.
           </p>
 
           {/* CTA buttons */}
@@ -125,16 +124,16 @@ export function SupportCard() {
               target="_blank"
               rel="noopener noreferrer"
               className={cn(
-                'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium',
+                'inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold',
                 'bg-amber-500 text-white hover:bg-amber-600',
                 'dark:bg-amber-600 dark:hover:bg-amber-500',
                 'focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400',
-                'transition-colors',
+                'transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md hover:shadow-amber-900/20',
               )}
             >
-              <Heart className="h-3 w-3" aria-hidden="true" />
+              <Heart className="h-3.5 w-3.5" aria-hidden="true" />
               One-time Support
-              <ExternalLink className="h-3 w-3 opacity-70" aria-hidden="true" />
+              <ExternalLink className="h-3.5 w-3.5 opacity-70" aria-hidden="true" />
             </a>
 
             <a
@@ -142,15 +141,15 @@ export function SupportCard() {
               target="_blank"
               rel="noopener noreferrer"
               className={cn(
-                'inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium',
+                'inline-flex items-center gap-1.5 rounded-xl border px-4 py-2 text-sm font-semibold',
                 'border-amber-400 text-amber-700 hover:bg-amber-100',
                 'dark:border-amber-700/60 dark:text-amber-400 dark:hover:bg-amber-900/20',
                 'focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400',
-                'transition-colors',
+                'transition-all duration-200 hover:-translate-y-0.5',
               )}
             >
               Become a Supporter
-              <ExternalLink className="h-3 w-3 opacity-70" aria-hidden="true" />
+              <ExternalLink className="h-3.5 w-3.5 opacity-70" aria-hidden="true" />
             </a>
           </div>
         </div>

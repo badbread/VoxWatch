@@ -50,6 +50,9 @@ const config: Config = {
         'slide-in-top': 'slideInTop 0.3s ease-out',
         'fade-in': 'fadeIn 0.2s ease-out',
         'pulse-dot': 'pulseDot 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+        'glow': 'glow 2s ease-in-out infinite alternate',
+        'waveform': 'waveform 1s ease-in-out infinite alternate',
       },
       keyframes: {
         slideInTop: {
@@ -64,6 +67,18 @@ const config: Config = {
           '0%, 100%': { opacity: '1' },
           '50%': { opacity: '0.4' },
         },
+        glow: {
+          '0%': { boxShadow: '0 0 5px rgba(34, 197, 94, 0.2)' },
+          '100%': { boxShadow: '0 0 20px rgba(34, 197, 94, 0.4)' },
+        },
+        waveform: {
+          '0%, 100%': { height: '4px' },
+          '50%': { height: '20px' },
+        },
+      },
+      borderRadius: {
+        '2xl': '16px',
+        '3xl': '24px',
       },
       backgroundColor: {
         // Brand dark background

@@ -1,21 +1,23 @@
 /**
  * CameraStatusCard — dashboard camera tile for the monitoring grid.
  *
- * Displays: camera name, status badge, schedule, and last detection time.
- * Clicking navigates to the Cameras page (handled by CameraStatusGrid).
+ * Visual redesign applied:
+ *  - Dark card surface with subtle shadow and rounded-2xl corners.
+ *  - Camera name + green/gray online dot instead of text badge.
+ *  - Placeholder preview area (dark box) in the middle of the card — ready for
+ *    a future live thumbnail when snapshot streaming is available.
+ *  - VoxWatch state rendered as a small color-coded badge at the bottom.
+ *  - Hover: lift + green shadow glow to reinforce "clickable" affordance.
+ *  - No-speaker cards get a red tint and reduced opacity.
  *
- * Shows a "No speaker" error badge when a camera has been identified as having
- * no audio output, and suppresses the "VoxWatch Enabled" badge in that case
- * since the deterrent cannot function.
+ * Clicking still navigates to the Cameras page via the parent grid wrapper.
  */
 
-import { Camera, Clock, Zap } from 'lucide-react';
+import { Camera } from 'lucide-react';
 import { cn } from '@/utils/cn';
-import { Badge } from '@/components/common/Badge';
 import { useConfigQuery } from '@/hooks/useConfig';
 import { formatScheduleLabel } from '@/utils/formatters';
 import type { CameraStatus } from '@/types/status';
-import type { BadgeVariant } from '@/components/common/Badge';
 
 export interface CameraStatusCardProps {
   camera: CameraStatus;
@@ -25,105 +27,111 @@ export interface CameraStatusCardProps {
  * Returns true when the camera has been positively identified as having no
  * audio output at all and therefore cannot work with VoxWatch.
  *
- * We only return true when the speaker_status is explicitly "none" — cameras
- * that have not been identified yet (speaker_status undefined or "unknown")
- * get the benefit of the doubt.
+ * We only return true when speaker_status is explicitly "none" — cameras that
+ * have not been identified yet get the benefit of the doubt.
  */
 function isSpeakerIncompatible(camera: CameraStatus): boolean {
   return camera.speaker_status === 'none';
 }
 
+/** Derive the badge label and color class from camera state. */
+function stateLabel(
+  enabled: boolean,
+  noSpeaker: boolean,
+  frigateOnline: boolean | undefined,
+): { text: string; color: string } {
+  if (noSpeaker) return { text: 'Incompatible', color: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400' };
+  if (enabled && frigateOnline !== false) return { text: 'VoxWatch On', color: 'bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-400' };
+  if (enabled && frigateOnline === false) return { text: 'Camera Offline', color: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400' };
+  if (frigateOnline === false) return { text: 'Offline', color: 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-500' };
+  return { text: 'Disabled', color: 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-500' };
+}
+
+/**
+ * Individual camera tile for the dashboard monitoring grid.
+ */
 export function CameraStatusCard({ camera }: CameraStatusCardProps) {
   const { data: config } = useConfigQuery();
   const noSpeaker = isSpeakerIncompatible(camera);
 
-  let variant: BadgeVariant = 'info';
-  let label = 'Online';
+  const isOnline = camera.frigate_online !== false;
+  const isActive = camera.enabled && !noSpeaker && isOnline;
 
-  if (noSpeaker) {
-    // Camera is incompatible — show a neutral/disabled state even if "enabled"
-    // was set before identification confirmed no audio output.
-    variant = 'neutral';
-    label = 'Incompatible';
-  } else if (camera.enabled && camera.frigate_online !== false) {
-    variant = 'connected';
-    label = 'VoxWatch Enabled';
-  } else if (camera.enabled && camera.frigate_online === false) {
-    variant = 'error';
-    label = 'VoxWatch - Offline';
-  } else if (camera.frigate_online === false) {
-    variant = 'neutral';
-    label = 'Offline';
-  }
+  const { text: badgeText, color: badgeColor } = stateLabel(
+    camera.enabled,
+    noSpeaker,
+    camera.frigate_online,
+  );
 
   const scheduleLabel = formatScheduleLabel(config?.conditions?.active_hours);
 
   return (
     <div
       className={cn(
-        'rounded-xl border bg-white p-4 dark:bg-gray-900',
-        camera.enabled && !noSpeaker
-          ? 'border-gray-200 dark:border-gray-700/50'
-          : 'border-gray-100 opacity-60 dark:border-gray-800',
+        'group relative flex flex-col rounded-2xl border bg-white dark:bg-gray-900/70 transition-all duration-200',
+        'hover:shadow-lg hover:shadow-green-500/5 dark:hover:shadow-green-500/10 hover:-translate-y-0.5',
+        isActive
+          ? 'border-gray-200 dark:border-gray-700/60'
+          : 'border-gray-200 dark:border-gray-800/60 opacity-60',
       )}
     >
-      {/* Header row — camera name + status badge */}
-      <div className="flex items-center justify-between gap-2">
+      {/* Header row — camera name + status dot */}
+      <div className="flex items-center justify-between gap-2 px-3.5 pt-3.5">
         <div className="flex items-center gap-2 min-w-0">
-          <Camera className="h-4 w-4 flex-shrink-0 text-gray-400" aria-hidden="true" />
+          <Camera className="h-3.5 w-3.5 flex-shrink-0 text-gray-400 dark:text-gray-500" aria-hidden="true" />
           <span className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
             {camera.name}
           </span>
         </div>
-        <div className="flex flex-shrink-0 items-center gap-1.5">
-          {/* "No speaker" badge — only shown when identification confirmed no audio output */}
-          {noSpeaker && (
-            <Badge variant="error" label="No speaker" size="xs" />
+
+        {/* Online indicator dot */}
+        <span
+          className={cn(
+            'h-2.5 w-2.5 flex-shrink-0 rounded-full',
+            isOnline ? 'bg-green-500' : 'bg-gray-600',
           )}
-          <Badge
-            variant={variant}
-            label={label}
-            size="xs"
-            dot={camera.enabled && !noSpeaker}
-            className="flex-shrink-0"
-          />
-        </div>
+          aria-label={isOnline ? 'Online' : 'Offline'}
+          title={isOnline ? 'Online' : 'Offline'}
+        />
       </div>
 
-      {/* Enabled camera metadata — schedule and last detection */}
-      {camera.enabled && !noSpeaker && (
-        <div className="mt-2 space-y-1">
-          {/* Active schedule */}
-          <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
-            <Clock className="h-3 w-3 text-cyan-500 flex-shrink-0" aria-hidden="true" />
-            <span className="font-medium text-cyan-600 dark:text-cyan-400">{scheduleLabel}</span>
-          </div>
+      {/* Preview placeholder — future: live thumbnail */}
+      <div
+        className={cn(
+          'mx-3.5 my-3 flex h-20 items-center justify-center rounded-xl',
+          'bg-gray-100 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/30',
+        )}
+        aria-hidden="true"
+      >
+        <Camera className="h-6 w-6 text-gray-300 dark:text-gray-700" />
+      </div>
 
-          {/* Last detection time */}
-          {camera.last_detection_at ? (
-            <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
-              <Zap className="h-3 w-3 text-rose-500 flex-shrink-0" aria-hidden="true" />
-              <span className="text-rose-600 dark:text-rose-400">
-                {new Date(camera.last_detection_at).toLocaleString()}
-              </span>
-            </div>
-          ) : (
-            <div className="flex items-center gap-1.5 text-xs text-gray-400 dark:text-gray-500">
-              <Zap className="h-3 w-3 flex-shrink-0" aria-hidden="true" />
-              <span>No detections yet</span>
-            </div>
+      {/* Footer row — schedule + badge */}
+      <div className="flex items-center justify-between gap-2 px-3.5 pb-3.5">
+        {isActive && (
+          <span className="truncate text-xs text-gray-500 dark:text-gray-500">
+            {scheduleLabel}
+          </span>
+        )}
+        {noSpeaker && (
+          <span className="truncate text-xs text-red-500">
+            {camera.compatibility_notes ?? 'No audio output'}
+          </span>
+        )}
+        {!isActive && !noSpeaker && (
+          <span className="text-xs text-gray-400 dark:text-gray-600" />
+        )}
+
+        {/* State badge */}
+        <span
+          className={cn(
+            'flex-shrink-0 rounded-lg px-2 py-0.5 text-xs font-semibold',
+            badgeColor,
           )}
-        </div>
-      )}
-
-      {/* Incompatibility note */}
-      {noSpeaker && (
-        <p className="mt-2 text-xs text-red-500 dark:text-red-400">
-          {camera.compatibility_notes ?? 'No audio output — VoxWatch deterrent cannot function.'}
-        </p>
-      )}
-
-      {/* Hover hint rendered by the parent button wrapper — nothing to add here */}
+        >
+          {badgeText}
+        </span>
+      </div>
     </div>
   );
 }

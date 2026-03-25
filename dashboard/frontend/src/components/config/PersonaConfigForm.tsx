@@ -304,12 +304,12 @@ function ModeCard({
         compact ? 'p-3' : 'p-4',
         isSelected
           ? [
-              'border-blue-500 bg-blue-50 shadow-sm',
-              'dark:border-blue-400 dark:bg-blue-950/40',
+              'border-blue-500/70 bg-blue-50 shadow-md shadow-blue-200/40 dark:bg-blue-950/30 dark:shadow-blue-900/20',
+              'dark:border-blue-400/60',
             ]
           : [
-              'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50',
-              'dark:border-gray-700 dark:bg-gray-800/60 dark:hover:border-gray-600 dark:hover:bg-gray-800',
+              'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50 dark:border-gray-700/40 dark:bg-gray-800/40 dark:hover:border-gray-600/60 dark:hover:bg-gray-800/60',
+              'hover:-translate-y-0.5 hover:shadow-sm',
             ],
       )}
     >
@@ -330,7 +330,7 @@ function ModeCard({
               compact ? 'text-xs' : 'text-sm',
               isSelected
                 ? 'text-blue-700 dark:text-blue-300'
-                : 'text-gray-800 dark:text-gray-100',
+                : 'text-gray-900 dark:text-gray-100',
             )}
           >
             {mode.name}
@@ -346,11 +346,10 @@ function ModeCard({
         {/* Description */}
         <p
           className={cn(
-            'mt-0.5',
-            compact ? 'text-xs' : 'text-xs',
+            'mt-0.5 text-xs',
             isSelected
               ? 'text-blue-600 dark:text-blue-400'
-              : 'text-gray-500 dark:text-gray-400',
+              : 'text-gray-500 dark:text-gray-500',
           )}
         >
           {mode.desc}
@@ -1508,10 +1507,70 @@ export function PersonaConfigForm({ value, onChange, ttsConfig }: PersonaConfigF
   return (
     <div className="space-y-6">
       {/* Section intro */}
-      <p className="text-sm text-gray-600 dark:text-gray-400">
-        Choose how VoxWatch speaks when it detects someone. The AI still describes the real
-        person — the response mode changes the voice and attitude of the message.
+      <p className="text-sm text-gray-500">
+        The response mode changes how VoxWatch speaks — the AI still describes the real person.
       </p>
+
+      {/* ── Voice Preview Banner ────────────────────────────────────────────── */}
+      {canPreview && (
+        <div className="rounded-2xl border border-gray-200 bg-gray-50 dark:border-gray-700/40 dark:bg-gray-900/60 p-4 space-y-3">
+          <div className="flex items-center gap-3">
+            <Headphones className="h-4 w-4 text-gray-500 dark:text-gray-400" aria-hidden="true" />
+            <span className="text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-gray-400">
+              Voice Preview
+            </span>
+            {/* Waveform animation — visible while generating */}
+            {previewMutation.isPending && (
+              <span className="flex items-end gap-0.5 h-5" aria-hidden="true">
+                {[...Array(5)].map((_, i) => (
+                  <span
+                    key={i}
+                    className="waveform-bar bg-green-400"
+                    style={{ animationDelay: `${i * 0.12}s` }}
+                  />
+                ))}
+              </span>
+            )}
+          </div>
+
+          <AudioPreview
+            audioBlob={previewMutation.data?.blob ?? null}
+            isLoading={previewMutation.isPending}
+            error={previewError}
+            generationTimeMs={previewMutation.data?.generationTimeMs}
+          />
+
+          {!previewMutation.isPending && (
+            <button
+              type="button"
+              onClick={handlePreview}
+              className={cn(
+                'flex w-full items-center justify-center gap-2.5 rounded-2xl px-6 py-3.5 text-sm font-semibold',
+                'transition-all duration-200 active:scale-[0.98]',
+                'focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
+                previewMutation.isSuccess
+                  ? [
+                      'bg-green-100 border border-green-300 text-green-700 dark:bg-green-900/40 dark:border-green-700/50 dark:text-green-300',
+                      'hover:bg-green-200 dark:hover:bg-green-900/60',
+                    ]
+                  : [
+                      'bg-blue-600 text-white shadow-md shadow-blue-900/30',
+                      'hover:bg-blue-500 hover:shadow-lg hover:shadow-blue-900/40 hover:-translate-y-0.5',
+                    ],
+              )}
+            >
+              <Headphones className="h-5 w-5" aria-hidden="true" />
+              {previewMutation.isSuccess ? 'Regenerate Preview' : 'Preview Voice'}
+            </button>
+          )}
+
+          {!previewMutation.isSuccess && !previewMutation.isError && !previewMutation.isPending && (
+            <p className="text-center text-xs text-gray-500 dark:text-gray-600">
+              Plays a sample clip in your browser — no camera speaker used.
+            </p>
+          )}
+        </div>
+      )}
 
       {/* ── Core Modes ─────────────────────────────────────────────────────── */}
       <div>
@@ -1609,61 +1668,16 @@ export function PersonaConfigForm({ value, onChange, ttsConfig }: PersonaConfigF
 
       {/* ── Example output quote ───────────────────────────────────────────── */}
       {activeDef?.example && activeName !== 'custom' && (
-        <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 dark:border-gray-700 dark:bg-gray-800/40">
-          <p className="mb-1 text-xs font-medium text-gray-500 dark:text-gray-400">
+        <div className="rounded-2xl border border-gray-200 bg-gray-50 dark:border-gray-700/40 dark:bg-gray-900/60 px-4 py-3.5">
+          <p className="mb-1.5 text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-gray-500">
             Example output
           </p>
-          <blockquote className="border-l-2 border-blue-400 pl-3 italic text-sm text-gray-700 dark:text-gray-200">
+          <blockquote className="border-l-2 border-blue-500/60 pl-3 italic text-sm text-gray-700 dark:text-gray-200">
             {activeDef.example}
           </blockquote>
-          <p className="mt-2 text-xs text-gray-400 dark:text-gray-500">
-            Actual AI output varies based on what the camera sees. The response mode changes
-            the style — the AI still describes the real person.
+          <p className="mt-2 text-xs text-gray-400 dark:text-gray-600">
+            Output varies based on what the camera sees.
           </p>
-        </div>
-      )}
-
-      {/* ── Audio preview ──────────────────────────────────────────────────── */}
-      {canPreview && (
-        <div className="space-y-2">
-          <AudioPreview
-            audioBlob={previewMutation.data?.blob ?? null}
-            isLoading={previewMutation.isPending}
-            error={previewError}
-            generationTimeMs={previewMutation.data?.generationTimeMs}
-          />
-
-          {!previewMutation.isPending && (
-            <button
-              type="button"
-              onClick={handlePreview}
-              className={cn(
-                'flex w-full items-center justify-center gap-2 rounded-xl border px-4 py-3 text-sm font-medium',
-                'transition-all duration-150 active:scale-[0.98]',
-                'focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
-                previewMutation.isSuccess
-                  ? [
-                      'border-green-300 bg-green-50 text-green-700',
-                      'hover:bg-green-100 dark:border-green-700/60 dark:bg-green-950/20 dark:text-green-300 dark:hover:bg-green-950/30',
-                    ]
-                  : [
-                      'border-gray-200 bg-white text-gray-700',
-                      'hover:border-gray-300 hover:bg-gray-50',
-                      'dark:border-gray-700 dark:bg-gray-800/60 dark:text-gray-300 dark:hover:border-gray-600 dark:hover:bg-gray-800',
-                    ],
-              )}
-            >
-              <Headphones className="h-4 w-4" aria-hidden="true" />
-              {previewMutation.isSuccess ? 'Regenerate Preview' : 'Preview Voice'}
-            </button>
-          )}
-
-          {!previewMutation.isSuccess && !previewMutation.isError && !previewMutation.isPending && (
-            <p className="text-center text-xs text-gray-400 dark:text-gray-500">
-              Plays a sample deterrent in your browser using the active voice. No camera
-              speaker used.
-            </p>
-          )}
         </div>
       )}
 
@@ -1733,7 +1747,7 @@ export function PersonaConfigForm({ value, onChange, ttsConfig }: PersonaConfigF
               className={cn(
                 'w-full resize-y rounded-lg border px-3 py-2 text-sm',
                 'focus:outline-none focus:ring-2 focus:ring-blue-500',
-                'dark:bg-gray-800 dark:text-gray-100',
+                'bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100',
                 charCount > CUSTOM_PROMPT_MAX
                   ? 'border-red-400 focus:border-red-400 focus:ring-red-400 dark:border-red-600'
                   : 'border-gray-300 focus:border-blue-500 dark:border-gray-600',

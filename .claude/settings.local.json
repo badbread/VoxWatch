@@ -25,7 +25,9 @@
       "Bash(git commit:*)",
       "Bash(git reflog:*)",
       "Bash(git gc:*)",
-      "Bash(git remote:*)"
+      "Bash(git remote:*)",
+      "Bash(tar -cf /tmp/dashboard-build.tar --exclude='node_modules' --exclude='.vite' --exclude='dist' --exclude='__pycache__' .)",
+      "Bash(curl -s -X POST \"http://10.1.10.21:9000/api/endpoints/14/docker/build?t=voxwatch-dashboard:latest&nocache=1\" -H \"X-API-Key: ptr_V/+jPmGXOTk65mLFIQOeJbYei8pP0yloB1iE72N0LD8=\" -H \"Content-Type: application/x-tar\" --data-binary @/tmp/dashboard-build.tar)"
     ]
   }
 }

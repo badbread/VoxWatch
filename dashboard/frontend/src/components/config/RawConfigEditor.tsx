@@ -401,8 +401,8 @@ export function RawConfigEditor() {
           </div>
         </Card>
         <Card title="config.yaml" noPadding>
-          <div className="flex h-[550px] items-center justify-center rounded-b-xl bg-gray-900">
-            <Loader className="h-6 w-6 animate-spin text-gray-500" />
+          <div className="flex h-[550px] items-center justify-center rounded-b-xl bg-gray-100 dark:bg-gray-900">
+            <Loader className="h-6 w-6 animate-spin text-gray-400 dark:text-gray-500" />
           </div>
         </Card>
       </div>
@@ -494,8 +494,8 @@ export function RawConfigEditor() {
                 });
               }}
               loading={
-                <div className="flex h-[550px] items-center justify-center bg-gray-900">
-                  <Loader className="h-6 w-6 animate-spin text-gray-500" />
+                <div className="flex h-[550px] items-center justify-center bg-gray-100 dark:bg-gray-900">
+                  <Loader className="h-6 w-6 animate-spin text-gray-400 dark:text-gray-500" />
                 </div>
               }
             />
@@ -515,8 +515,8 @@ export function RawConfigEditor() {
               }}
               onMount={handleEditorMount}
               loading={
-                <div className="flex h-[550px] items-center justify-center bg-gray-900">
-                  <Loader className="h-6 w-6 animate-spin text-gray-500" />
+                <div className="flex h-[550px] items-center justify-center bg-gray-100 dark:bg-gray-900">
+                  <Loader className="h-6 w-6 animate-spin text-gray-400 dark:text-gray-500" />
                 </div>
               }
             />

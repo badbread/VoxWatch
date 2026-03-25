@@ -38,6 +38,13 @@
     transition: background-color 150ms ease, color 150ms ease;
   }
 
+  /* Global smooth transitions for interactive elements */
+  *:not(svg):not(path) {
+    transition-property: color, background-color, border-color, box-shadow, transform, opacity;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    transition-duration: 200ms;
+  }
+
   /* Focus ring reset — rely on explicit focus-visible utilities */
   :focus:not(:focus-visible) {
     outline: none;
@@ -86,6 +93,20 @@
  * --------------------------------------------------------------------------- */
 
 @layer utilities {
+  /* Waveform animation bars for voice preview */
+  @keyframes waveform {
+    0%, 100% { height: 4px; }
+    50% { height: 20px; }
+  }
+
+  .waveform-bar {
+    display: inline-block;
+    width: 3px;
+    border-radius: 2px;
+    background-color: currentColor;
+    animation: waveform 1s ease-in-out infinite alternate;
+  }
+
   .line-clamp-1 {
     overflow: hidden;
     display: -webkit-box;
