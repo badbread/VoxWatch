@@ -33,6 +33,19 @@ codebase changes.
 - Response: audio/wav streaming
 - Dispatch personas proxy to VoxWatch port 8892, fallback to local TTS
 
+### POST /api/audio/upload-intro
+- Upload custom dispatch channel intro audio file (WAV/MP3)
+- Request: multipart/form-data with audio file (max 10MB)
+- Response: saved path, file size, detected format
+- Validates audio magic bytes (RIFF, MP3, Ogg, FLAC)
+- Saves atomically to /config/audio/dispatch_intro.wav
+
+### POST /api/audio/generate-intro
+- Generate dispatch intro via TTS and optionally save
+- Proxies to VoxWatch Preview API for local TTS providers
+- Falls back to direct cloud synthesis (ElevenLabs, OpenAI, Cartesia)
+- Returns WAV bytes with X-Intro-Saved header
+
 ### GET /api/cameras
 - List all cameras (config + Frigate + go2rtc merged)
 - Response: array of CameraStatus

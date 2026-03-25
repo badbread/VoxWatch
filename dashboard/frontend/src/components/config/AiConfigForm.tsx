@@ -200,7 +200,9 @@ function ProviderSelector({
 
   const providerInfo = PROVIDERS.find((p) => p.id === provider);
   const modelInfo = providerInfo?.models.find((m) => m.id === model);
-  const isCustomModel = provider === 'custom' || (providerInfo && !modelInfo);
+  // Show dropdown for known providers even if the current model isn't in the list
+  // (e.g. config has deprecated "gemini-2.0-flash" — show dropdown with it as extra option)
+  const isCustomModel = provider === 'custom' || (!providerInfo?.models?.length);
 
   const handleProviderSwitch = (newProvider: string) => {
     const newProviderInfo = PROVIDERS.find((p) => p.id === newProvider);
