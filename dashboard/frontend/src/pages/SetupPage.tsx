@@ -49,7 +49,7 @@ export function SetupPage() {
 
         {/* Footer */}
         <p className="mt-6 text-center text-xs text-gray-700">
-          VoxWatch — open-source AI security audio. All data stays on your server.
+          VoxWatch — open-source AI security audio deterrent.
         </p>
       </div>
     </div>

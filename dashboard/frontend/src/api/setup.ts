@@ -84,6 +84,16 @@ export interface ProbeResult {
   backchannel_info: Record<string, { has_backchannel: boolean; codecs: string[] }>;
   /** Whether the MQTT broker accepted a test connection. */
   mqtt_reachable: boolean;
+  /**
+   * MQTT host extracted from Frigate's /api/config mqtt.host field.
+   * Null when Frigate is unreachable or does not have mqtt.host configured.
+   */
+  mqtt_host_detected: string | null;
+  /**
+   * MQTT port extracted from Frigate's /api/config mqtt.port field.
+   * Null when not available.
+   */
+  mqtt_port_detected: number | null;
   /** How long the entire probe took in milliseconds. */
   probe_duration_ms: number;
   /** Per-service error messages if any service was unreachable. */
@@ -123,6 +133,10 @@ export interface GenerateConfigRequest {
   tts_engine: string;
   /** TTS voice identifier for the selected engine. */
   tts_voice: string;
+  /** API key for cloud TTS engines (empty string for local engines). */
+  tts_api_key: string;
+  /** Host URL for self-hosted TTS engines like Kokoro (empty string when not used). */
+  tts_host: string;
   /** Response mode name (e.g. "live_operator", "police_dispatch"). */
   response_mode: string;
   /**

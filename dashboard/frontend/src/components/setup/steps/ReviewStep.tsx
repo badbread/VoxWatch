@@ -23,6 +23,7 @@ import {
   Mic,
   Camera,
   Shield,
+  Minus,
 } from 'lucide-react';
 import { useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
@@ -45,7 +46,8 @@ function ReviewRow({
   icon: React.ElementType;
   label: string;
   value: string;
-  status?: 'ok' | 'warn' | 'skip';
+  /** ok = green check, warn = amber X, neutral = grey dash (no probe done) */
+  status?: 'ok' | 'warn' | 'neutral';
 }) {
   return (
     <div className="flex items-center gap-3 rounded-lg px-4 py-3 bg-gray-800/40">
@@ -54,6 +56,7 @@ function ReviewRow({
       <span className="flex-1 text-sm font-medium text-gray-200 truncate">{value}</span>
       {status === 'ok' && <CheckCircle className="h-4 w-4 shrink-0 text-green-400" />}
       {status === 'warn' && <XCircle className="h-4 w-4 shrink-0 text-amber-400" />}
+      {status === 'neutral' && <Minus className="h-4 w-4 shrink-0 text-gray-600" />}
     </div>
   );
 }
@@ -87,6 +90,9 @@ export function ReviewStep({ state }: ReviewStepProps) {
         ai_api_key: state.aiApiKey,
         tts_engine: state.ttsEngine,
         tts_voice: state.ttsVoice,
+        // Provider-specific TTS config: API keys and Kokoro host
+        tts_api_key: state.ttsProviderConfig.api_key ?? '',
+        tts_host: state.ttsProviderConfig.kokoro_host ?? '',
         response_mode: state.responseMode,
         cameras: state.selectedCameras,
       }),
@@ -143,11 +149,17 @@ export function ReviewStep({ state }: ReviewStepProps) {
           value={`${state.go2rtcHost || state.frigateHost}:${state.go2rtcPort}`}
           status={state.probeResult?.go2rtc_reachable ? 'ok' : 'warn'}
         />
+        {/*
+          MQTT: show the user-entered host:port with a neutral (no status)
+          indicator. The probe result may be stale — the user may have changed
+          the MQTT host on the MQTT step after the initial probe. VoxWatch will
+          validate MQTT on first startup using whatever values are written here.
+        */}
         <ReviewRow
           icon={Radio}
           label="MQTT"
           value={`${state.mqttHost || state.frigateHost}:${state.mqttPort}`}
-          status={state.probeResult?.mqtt_reachable ? 'ok' : 'warn'}
+          status="neutral"
         />
         <ReviewRow
           icon={Brain}

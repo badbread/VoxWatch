@@ -203,12 +203,15 @@ export function SetupWizard() {
         });
         dispatch({ type: 'SET_PROBE_RESULT', result });
 
-        // Pre-fill MQTT host from Frigate host if not yet set
+        // Pre-fill MQTT host/port from Frigate's own config (mqtt.host / mqtt.port)
+        // when the wizard hasn't been customised yet. This avoids incorrectly
+        // assuming the MQTT broker is co-located with Frigate — Frigate knows
+        // where its broker is, so we use that value directly.
         if (!state.mqttHost) {
           dispatch({
             type: 'SET_MQTT',
-            host: result.mqtt_reachable ? (state.mqttHost || host) : host,
-            port: state.mqttPort,
+            host: result.mqtt_host_detected ?? host,
+            port: result.mqtt_port_detected ?? state.mqttPort,
             user: state.mqttUser,
             password: state.mqttPassword,
             topic: state.mqttTopic,
@@ -360,9 +363,10 @@ export function SetupWizard() {
           <TtsProviderStep
             ttsEngine={state.ttsEngine}
             ttsVoice={state.ttsVoice}
+            ttsProviderConfig={state.ttsProviderConfig}
             responseMode={state.responseMode}
-            onNext={(engine, voice) => {
-              dispatch({ type: 'SET_TTS', engine, voice });
+            onNext={(engine, voice, providerConfig) => {
+              dispatch({ type: 'SET_TTS', engine, voice, providerConfig });
               goTo('mode');
             }}
           />

@@ -23,6 +23,7 @@
 
 import { useReducer } from 'react';
 import type { ProbeResult } from '@/api/setup';
+import type { TtsProviderConfig } from './steps/TtsProviderStep';
 
 // ---------------------------------------------------------------------------
 // Step type
@@ -94,6 +95,11 @@ export interface SetupState {
   // -- TTS -------------------------------------------------------------------
   ttsEngine: string;
   ttsVoice: string;
+  /**
+   * Provider-specific TTS config captured on the TTS step.
+   * Contains kokoro_host, api_key (for cloud engines), or aws_region (Polly).
+   */
+  ttsProviderConfig: TtsProviderConfig;
 
   // -- Response mode ---------------------------------------------------------
   responseMode: string;
@@ -122,7 +128,7 @@ type SetupAction =
   | { type: 'SET_PROBE_RESULT'; result: ProbeResult }
   | { type: 'SET_PROBING'; value: boolean }
   | { type: 'SET_AI'; provider: string; model: string; apiKey: string; host: string }
-  | { type: 'SET_TTS'; engine: string; voice: string }
+  | { type: 'SET_TTS'; engine: string; voice: string; providerConfig: TtsProviderConfig }
   | { type: 'SET_RESPONSE_MODE'; mode: string }
   | { type: 'TOGGLE_CAMERA'; name: string; enabled: boolean }
   | { type: 'SET_CAMERA_STREAM'; name: string; stream: string }
@@ -158,6 +164,7 @@ const initialState: SetupState = {
 
   ttsEngine: 'piper',
   ttsVoice: 'en_US-lessac-medium',
+  ttsProviderConfig: {},
 
   responseMode: 'live_operator',
 
@@ -217,7 +224,12 @@ function setupReducer(state: SetupState, action: SetupAction): SetupState {
       };
 
     case 'SET_TTS':
-      return { ...state, ttsEngine: action.engine, ttsVoice: action.voice };
+      return {
+        ...state,
+        ttsEngine: action.engine,
+        ttsVoice: action.voice,
+        ttsProviderConfig: action.providerConfig,
+      };
 
     case 'SET_RESPONSE_MODE':
       return { ...state, responseMode: action.mode };
