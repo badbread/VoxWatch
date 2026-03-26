@@ -18,6 +18,10 @@ ignore = [
     "E501",   # line too long — handled by formatter
     "B008",   # function call in default arg — common in FastAPI
     "SIM108", # ternary operator — readability preference
+    "SIM105", # contextlib.suppress — prefer explicit try/except for clarity
+    "SIM117", # nested with — prefer explicit for readability
+    "B027",   # empty method in ABC — intentional default implementations
+    "B904",   # raise from err — adds noise in fallback chains
 ]
 
 [lint.isort]

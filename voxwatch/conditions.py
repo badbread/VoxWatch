@@ -25,7 +25,8 @@ Design note — why monotonic for cooldowns?
 
 import logging
 import time
-from datetime import datetime, time as dt_time, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+from datetime import time as dt_time
 from typing import Any
 
 logger = logging.getLogger("voxwatch.conditions")
@@ -124,14 +125,14 @@ def is_between_sunset_and_sunrise(
             longitude=lon,
         )
 
-        now_utc = datetime.now(tz=timezone.utc)
+        now_utc = datetime.now(tz=UTC)
 
         # Get today's and tomorrow's sun info so we can straddle midnight.
-        sun_today = sun(location.observer, date=now_utc.date(), tzinfo=timezone.utc)
+        sun_today = sun(location.observer, date=now_utc.date(), tzinfo=UTC)
         sun_tomorrow = sun(
             location.observer,
             date=(now_utc + timedelta(days=1)).date(),
-            tzinfo=timezone.utc,
+            tzinfo=UTC,
         )
 
         sunset_today = sun_today["sunset"]

@@ -50,11 +50,11 @@ Prerequisites:
 """
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
 import random
-from typing import Optional
 
 logger = logging.getLogger("voxwatch.radio_dispatch")
 
@@ -199,7 +199,6 @@ def normalize_dispatch_text(text: str) -> str:
     Returns:
         Text with all codes and numbers normalized for natural TTS pronunciation.
     """
-    import re
 
     result = text
     # Step 1: Replace known 10-codes FIRST (before digit expansion)
@@ -358,7 +357,7 @@ def segment_dispatch_message(
             inner_lines = inner_lines[:-1]
         cleaned = "\n".join(inner_lines).strip()
 
-    parsed: Optional[dict] = None
+    parsed: dict | None = None
     try:
         candidate = json.loads(cleaned)
         if isinstance(candidate, dict):
@@ -582,22 +581,21 @@ async def _generate_system_voice_tts(
             system_voice = "af_sky"
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{kokoro_host}/tts",
-                    json={"text": text, "voice": system_voice, "speed": 0.95},
-                    timeout=aiohttp.ClientTimeout(total=10),
-                ) as resp:
-                    if resp.status == 200:
-                        data = await resp.read()
-                        with open(output_path, "wb") as f:
-                            f.write(data)
-                        if os.path.exists(output_path):
-                            logger.debug(
-                                "System voice TTS via Kokoro (%s): %d bytes",
-                                system_voice, len(data),
-                            )
-                            return True
+            async with aiohttp.ClientSession() as session, session.post(
+                f"{kokoro_host}/tts",
+                json={"text": text, "voice": system_voice, "speed": 0.95},
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.read()
+                    with open(output_path, "wb") as f:
+                        f.write(data)
+                    if os.path.exists(output_path):
+                        logger.debug(
+                            "System voice TTS via Kokoro (%s): %d bytes",
+                            system_voice, len(data),
+                        )
+                        return True
         except Exception as exc:
             logger.debug("Kokoro system voice failed: %s — falling back", exc)
 
@@ -654,7 +652,7 @@ async def generate_channel_intro(
     audio_pipeline,
     config: dict,
     output_dir: str,
-) -> Optional[str]:
+) -> str | None:
     """Generate the "connecting to live radio" intro sequence.
 
     Builds a short 3-4 second preamble that plays before the main dispatch
@@ -908,7 +906,7 @@ async def compose_dispatch_audio(
     audio_pipeline,
     config: dict,
     stage_label: str,
-) -> Optional[str]:
+) -> str | None:
     """Generate and compose segmented dispatch audio into a single WAV file.
 
     For each segment:
@@ -958,7 +956,7 @@ async def compose_dispatch_audio(
         config.get("response_mode", config.get("persona", {})).get("dispatch", {})
     )
     channel_intro_enabled: bool = dispatch_cfg.get("channel_intro", True)
-    intro_path: Optional[str] = None
+    intro_path: str | None = None
     if channel_intro_enabled:
         intro_path = await generate_channel_intro(
             audio_pipeline=audio_pipeline,
@@ -1174,7 +1172,7 @@ async def compose_dispatch_audio(
             stderr=asyncio.subprocess.DEVNULL,
         )
         await asyncio.wait_for(proc.wait(), timeout=_CONCAT_TIMEOUT_SECONDS)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error("radio_dispatch: ffmpeg concat timed out — aborting")
         _cleanup_paths(all_temp_paths)
         return None
@@ -1280,10 +1278,8 @@ async def compose_dispatch_audio(
                     )
                 finally:
                     if not merged_ok:
-                        try:
+                        with contextlib.suppress(OSError):
                             _shutil_officer.copy2(interim_path, output_path)
-                        except OSError:
-                            pass
                     _cleanup_paths(
                         [officer_concat_list, interim_path, officer_wav_path, officer_pause_path]
                     )
@@ -1312,7 +1308,7 @@ async def generate_officer_response(
     audio_pipeline,
     config: dict,
     output_path: str,
-) -> Optional[str]:
+) -> str | None:
     """Generate an officer radio acknowledgment response clip.
 
     Selects a random acknowledgment line from ``OFFICER_RESPONSES``, fills in
@@ -1377,8 +1373,8 @@ async def generate_officer_response(
 
     # ── Voice / config setup ──────────────────────────────────────────────────
     serve_dir: str = audio_pipeline._serve_dir
-    codec: str = config.get("audio", {}).get("codec", "pcm_mulaw")
-    sample_rate: str = str(config.get("audio", {}).get("sample_rate", 8000))
+    config.get("audio", {}).get("codec", "pcm_mulaw")
+    str(config.get("audio", {}).get("sample_rate", 8000))
 
     tts_provider: str = config.get("tts", {}).get("provider", "piper")
     is_kokoro: bool = tts_provider == "kokoro"

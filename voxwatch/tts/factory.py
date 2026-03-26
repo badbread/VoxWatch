@@ -41,7 +41,6 @@ Usage:
 """
 
 import logging
-from typing import Optional
 
 from voxwatch.tts.base import TTSProvider, TTSProviderError, TTSResult
 
@@ -51,7 +50,7 @@ logger = logging.getLogger("voxwatch.tts.factory")
 _ALL_PROVIDERS = ("piper", "kokoro", "elevenlabs", "cartesia", "polly", "openai", "espeak")
 
 
-def _build_provider(name: str, config: dict) -> Optional[TTSProvider]:
+def _build_provider(name: str, config: dict) -> TTSProvider | None:
     """Instantiate a single TTS provider by name, returning None on failure.
 
     Import errors and ``TTSProviderError`` raised during construction are
@@ -254,7 +253,7 @@ async def generate_with_fallback(
 
     # Try each provider in the fallback chain.
     chain = get_fallback_chain(config)
-    last_error: Optional[TTSProviderError] = None
+    last_error: TTSProviderError | None = None
 
     for provider in chain:
         # Skip the primary provider if it already appeared in the chain

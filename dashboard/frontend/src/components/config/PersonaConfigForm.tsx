@@ -40,8 +40,7 @@ import {
 } from 'lucide-react';
 import { useMutation } from '@tanstack/react-query';
 import { cn } from '@/utils/cn';
-import { AudioPreview } from '@/components/common/AudioPreview';
-import { previewAudio, generateIntroAudio, uploadIntroAudio } from '@/api/status';
+import { generateIntroAudio, uploadIntroAudio } from '@/api/status';
 import type { ResponseModeConfig, DispatchConfig, TtsConfig, ConfigValidationError } from '@/types/config';
 
 /** Maximum recommended character count for a custom response mode prompt. */
@@ -1407,9 +1406,6 @@ export function PersonaConfigForm({ value, onChange, ttsConfig }: PersonaConfigF
    */
   function handleSelectMode(id: string) {
     onChange({ ...value, name: id });
-    // Clear audio preview when mode changes so the player doesn't show
-    // stale audio for the previous mode.
-    previewMutation.reset();
   }
 
   /**
@@ -1430,71 +1426,6 @@ export function PersonaConfigForm({ value, onChange, ttsConfig }: PersonaConfigF
   function handleDispatchChange(dispatch: DispatchConfig) {
     onChange({ ...value, dispatch });
   }
-
-  // ── Audio preview ─────────────────────────────────────────────────────────
-  const previewMutation = useMutation({
-    mutationFn: previewAudio,
-  });
-
-  /**
-   * Build and fire the preview request. Reads the active TTS provider,
-   * voice, host URL, and speed from ttsConfig so the preview matches whatever
-   * the user currently has configured on the TTS tab.
-   */
-  function handlePreview() {
-    if (!ttsConfig) return;
-
-    const provider = ttsConfig.engine || 'kokoro';
-    let voice = 'af_heart';
-    let providerHost: string | undefined;
-    let speed = 1.0;
-
-    if (provider === 'kokoro') {
-      voice = ttsConfig.kokoro_voice ?? 'af_heart';
-      providerHost = ttsConfig.kokoro_host || undefined;
-      speed = ttsConfig.kokoro_speed ?? 1.0;
-    } else if (provider === 'piper') {
-      voice = ttsConfig.piper_model ?? 'en_US-lessac-medium';
-      speed = ttsConfig.voice_speed ?? 1.0;
-    } else if (provider === 'espeak') {
-      voice = 'espeak';
-      const wpm = ttsConfig.espeak_speed ?? 175;
-      speed = wpm / 175;
-    } else if (provider === 'elevenlabs') {
-      voice = ttsConfig.elevenlabs_voice_id ?? 'pNInz6obpgDQGcFmaJgB';
-      speed = 1.0;
-    } else if (provider === 'openai') {
-      voice = ttsConfig.openai_voice ?? 'onyx';
-      speed = ttsConfig.openai_speed ?? 1.0;
-    } else if (provider === 'cartesia') {
-      voice = ttsConfig.cartesia_voice_id ?? '';
-      speed = ttsConfig.cartesia_speed ?? 1.0;
-    }
-
-    // Reset any previous result before firing — ensures the AudioPreview
-    // component shows the loading state immediately instead of replaying
-    // stale audio from a previous persona.
-    previewMutation.reset();
-    previewMutation.mutate({
-      persona: activeName,
-      voice,
-      provider,
-      provider_host: providerHost,
-      speed,
-    });
-  }
-
-  /** Whether the preview button should be shown (TTS config available and provider is previewable). */
-  const canPreview =
-    !!ttsConfig &&
-    ['kokoro', 'piper', 'espeak', 'elevenlabs', 'openai', 'cartesia'].includes(
-      ttsConfig.engine || 'kokoro',
-    );
-
-  /** Error message extracted from the mutation error. */
-  const previewError = previewMutation.isError
-    ? (previewMutation.error as Error)?.message ?? 'Preview failed'
-    : null;
 
   const charCount = customPrompt.length;
   const charCountColor =

@@ -134,7 +134,7 @@ class EspeakProvider(TTSProvider):
                 proc.communicate(),
                 timeout=self._timeout,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             raise TTSProviderError(
                 self.name,
                 f"Process timed out after {self._timeout}s",

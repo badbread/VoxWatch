@@ -37,14 +37,15 @@ Design notes:
 """
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
 import random
 import re
 import tempfile
-from dataclasses import dataclass, field
-from typing import Optional, TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     # Avoid a circular import at module load time.  AudioPipeline is only used
@@ -338,7 +339,7 @@ async def generate_silence(
             stderr.decode("utf-8", errors="replace")[-200:],
         )
         return False
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error("generate_silence: ffmpeg timed out after %ds", _SUBPROCESS_TIMEOUT)
         return False
     except FileNotFoundError:
@@ -398,7 +399,7 @@ async def apply_speed_variation(
             stderr.decode("utf-8", errors="replace")[-200:],
         )
         return False
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error(
             "apply_speed_variation: ffmpeg timed out after %ds", _SUBPROCESS_TIMEOUT
         )
@@ -480,7 +481,7 @@ async def concatenate_segments(
             stderr.decode("utf-8", errors="replace")[-400:],
         )
         return False
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error(
             "concatenate_segments: ffmpeg timed out after %ds", _SUBPROCESS_TIMEOUT
         )
@@ -489,10 +490,8 @@ async def concatenate_segments(
         logger.error("concatenate_segments: ffmpeg not found on PATH")
         return False
     finally:
-        try:
+        with contextlib.suppress(OSError):
             os.remove(concat_list_path)
-        except OSError:
-            pass
 
 
 # ---------------------------------------------------------------------------
@@ -505,7 +504,7 @@ async def generate_natural_speech(
     audio_pipeline: "AudioPipeline",
     output_path: str,
     config: dict,
-    cadence_config: Optional[CadenceConfig] = None,
+    cadence_config: CadenceConfig | None = None,
 ) -> bool:
     """Generate natural-sounding speech from a list of short phrases.
 
@@ -738,10 +737,8 @@ async def generate_natural_speech(
         return False
     finally:
         # Always clean up temp files regardless of success or failure.
-        try:
+        with contextlib.suppress(Exception):
             tmp_dir_obj.cleanup()
-        except Exception:
-            pass
 
 
 # ---------------------------------------------------------------------------
@@ -785,7 +782,7 @@ async def _convert_to_work_format(input_path: str, output_path: str) -> bool:
             stderr.decode("utf-8", errors="replace")[-200:],
         )
         return False
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error(
             "_convert_to_work_format: ffmpeg timed out after %ds", _SUBPROCESS_TIMEOUT
         )

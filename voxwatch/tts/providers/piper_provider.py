@@ -169,7 +169,7 @@ class PiperProvider(TTSProvider):
                 proc.communicate(input=message.encode("utf-8")),
                 timeout=self._timeout,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             raise TTSProviderError(
                 self.name,
                 f"piper timed out after {self._timeout}s",

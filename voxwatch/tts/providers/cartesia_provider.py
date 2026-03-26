@@ -33,7 +33,7 @@ Usage:
 import asyncio
 import logging
 import os
-from typing import Any, Optional, Union
+from typing import Any
 
 from voxwatch.tts.base import TTSProvider, TTSProviderError, TTSResult
 
@@ -82,7 +82,7 @@ class CartesiaProvider(TTSProvider):
 
         tts_cfg = config.get("tts", {})
 
-        api_key: Optional[str] = (
+        api_key: str | None = (
             tts_cfg.get("cartesia_api_key")
             or os.environ.get("CARTESIA_API_KEY")
         )
@@ -96,7 +96,7 @@ class CartesiaProvider(TTSProvider):
         self._api_key: str = api_key
         self._voice_id: str = tts_cfg.get("cartesia_voice_id", _DEFAULT_VOICE_ID)
         self._model: str = tts_cfg.get("cartesia_model", _DEFAULT_MODEL)
-        self._speed: Union[str, float] = tts_cfg.get("cartesia_speed", "normal")
+        self._speed: str | float = tts_cfg.get("cartesia_speed", "normal")
         self._emotion: list[str] = tts_cfg.get("cartesia_emotion", [])
         self._timeout: int = int(tts_cfg.get("cartesia_timeout", 30))
 
@@ -145,7 +145,7 @@ class CartesiaProvider(TTSProvider):
                 loop.run_in_executor(None, self._call_api, message, output_path),
                 timeout=self._timeout + 5,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             raise TTSProviderError(
                 self.name,
                 f"API call timed out after {self._timeout}s",
