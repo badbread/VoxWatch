@@ -7,7 +7,7 @@
  * A small monthly-estimate footer sits at the very bottom of the section.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { DollarSign, ChevronDown, ChevronUp, Zap, Server, CheckCircle, XCircle, Loader, FlaskConical } from 'lucide-react';
 import { useMutation } from '@tanstack/react-query';
 import { errorForField } from '@/utils/validators';
@@ -216,6 +216,19 @@ function ProviderSelector({
     }
     onBatchChange(patch);
   };
+
+  // Auto-select the recommended model when the provider is set but model is
+  // empty or not recognised — e.g. on initial load from a config that has
+  // provider: 'gemini' but model: '' (never set by the user).
+  useEffect(() => {
+    if (isCustomModel || !providerInfo?.models?.length) return;
+    const modelIsKnown = providerInfo.models.some((m) => m.id === model);
+    if (!model || !modelIsKnown) {
+      const recommended = providerInfo.models.find((m) => m.recommended) ?? providerInfo.models[0];
+      if (recommended) onModelChange(recommended.id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [provider]);
 
   return (
     <div className="space-y-2">

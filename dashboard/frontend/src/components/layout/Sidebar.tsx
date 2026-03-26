@@ -32,7 +32,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Dashboard',     to: '/',       icon: LayoutDashboard },
   { label: 'Cameras',       to: '/cameras', icon: Camera },
   { label: 'Configuration', to: '/config',  icon: Settings },
-  { label: 'Tests',         to: '/tests',   icon: FlaskConical },
+  { label: 'Advanced',      to: '/tests',   icon: FlaskConical },
 ];
 
 /** Secondary items rendered below the separator (utility / setup). */

@@ -14,10 +14,10 @@ import {
   Clock,
   Brain,
   Layers,
-  Mic,
   // Volume2 removed — Audio Output section removed
-  FileText,
+  // Mic and FileText removed — TTS/Logging sections restructured
   Theater,
+  Headphones,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { Card } from '@/components/common/Card';
@@ -32,10 +32,11 @@ import { AiConfigForm } from './AiConfigForm';
 import { StagesConfigForm } from './StagesConfigForm';
 import { TtsConfigForm } from './TtsConfigForm';
 // AudioConfigForm removed — codec settings are per-camera now
-import { LoggingConfigForm } from './LoggingConfigForm';
+// LoggingConfigForm removed — logging tab removed from config editor
 import { PersonaConfigForm } from './PersonaConfigForm';
 import { useConfigQuery, useConfigMutation } from '@/hooks/useConfig';
 import { validateConfig } from '@/utils/validators';
+import { inputCls, Field } from '@/components/common/FormField';
 import type { VoxWatchConfig } from '@/types/config';
 
 interface TabDef {
@@ -48,12 +49,12 @@ interface TabDef {
 // Note: the Cameras tab has been removed — camera management now lives on the
 // Cameras page (/cameras) where users can add, edit, and remove cameras inline.
 const TABS: TabDef[] = [
-  { id: 'services', label: 'Services', icon: Server, section: 'frigate' },
-  { id: 'detection', label: 'Mode', icon: Clock, section: 'conditions' },
-  { id: 'ai', label: 'AI Provider', icon: Brain, section: 'ai' },
+  { id: 'response_mode', label: 'Personality', icon: Theater, section: 'response_mode' },
+  { id: 'tts', label: 'TTS', icon: Headphones, section: 'response_mode' },
+  { id: 'detection', label: 'Detection', icon: Clock, section: 'conditions' },
   { id: 'pipeline', label: 'Pipeline', icon: Layers, section: 'stages' },
-  { id: 'response_mode', label: 'TTS/Personality', icon: Theater, section: 'response_mode' },
-  { id: 'logging', label: 'Logging', icon: FileText, section: 'logging' },
+  { id: 'ai', label: 'AI Provider', icon: Brain, section: 'ai' },
+  { id: 'services', label: 'Connections', icon: Server, section: 'frigate' },
 ];
 
 /**
@@ -186,6 +187,80 @@ export function ConfigEditor() {
                       errors={validationResult.errors}
                     />
                   </div>
+                  <hr className="border-gray-200 dark:border-gray-700" />
+                  <div>
+                    <h4 className="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
+                      <Radio className="h-4 w-4 text-green-500" /> MQTT Publishing
+                    </h4>
+                    <p className="mb-3 text-sm text-gray-600 dark:text-gray-400">
+                      Publish VoxWatch events to MQTT for Home Assistant automations.
+                    </p>
+                    <div className="space-y-3">
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={localConfig.mqtt_publish?.enabled ?? true}
+                          onChange={(e) => handleChange({
+                            mqtt_publish: {
+                              ...localConfig.mqtt_publish,
+                              enabled: e.target.checked,
+                            },
+                          })}
+                          className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        Enable MQTT event publishing
+                      </label>
+                      {(localConfig.mqtt_publish?.enabled ?? true) && (
+                        <div className="ml-6 space-y-3">
+                          <Field label="Topic Prefix">
+                            <input
+                              type="text"
+                              value={localConfig.mqtt_publish?.topic_prefix ?? 'voxwatch'}
+                              onChange={(e) => handleChange({
+                                mqtt_publish: {
+                                  ...localConfig.mqtt_publish,
+                                  topic_prefix: e.target.value,
+                                },
+                              })}
+                              placeholder="voxwatch"
+                              className={inputCls(false)}
+                            />
+                          </Field>
+                          <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                            <input
+                              type="checkbox"
+                              checked={localConfig.mqtt_publish?.include_ai_analysis ?? true}
+                              onChange={(e) => handleChange({
+                                mqtt_publish: {
+                                  ...localConfig.mqtt_publish,
+                                  include_ai_analysis: e.target.checked,
+                                },
+                              })}
+                              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            Include AI analysis in stage events
+                          </label>
+                          <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                            <input
+                              type="checkbox"
+                              checked={localConfig.mqtt_publish?.include_snapshot_url ?? true}
+                              onChange={(e) => handleChange({
+                                mqtt_publish: {
+                                  ...localConfig.mqtt_publish,
+                                  include_snapshot_url: e.target.checked,
+                                },
+                              })}
+                              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            Include Frigate snapshot URL in events
+                          </label>
+                          <p className="text-xs text-gray-400 dark:text-gray-500">
+                            Events publish to: {localConfig.mqtt_publish?.topic_prefix ?? 'voxwatch'}/events/*
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
               )}
               {activeTab === 'detection' && (
@@ -220,44 +295,26 @@ export function ConfigEditor() {
                 </div>
               )}
               {activeTab === 'response_mode' && (
-                <div className="space-y-6">
-                  <div>
-                    <h4 className="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-800 dark:text-gray-200">
-                      <Mic className="h-4 w-4 text-orange-500" /> Text-to-Speech
-                    </h4>
-                    <TtsConfigForm
-                      value={localConfig.tts}
-                      onChange={(tts) => handleChange({ tts })}
-                      errors={validationResult.errors}
-                      activePersona={
-                        localConfig.response_mode?.name ??
-                        localConfig.persona?.name ??
-                        'standard'
-                      }
-                    />
-                  </div>
-                  <hr className="border-gray-200 dark:border-gray-700" />
-                  <div>
-                    <h4 className="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-800 dark:text-gray-200">
-                      <Theater className="h-4 w-4 text-purple-500" /> Response Mode
-                    </h4>
-                    <PersonaConfigForm
-                      value={
-                        localConfig.response_mode ??
-                        localConfig.persona ?? { name: 'standard', custom_prompt: '' }
-                      }
-                      onChange={(response_mode) => handleChange({ response_mode })}
-                      errors={validationResult.errors}
-                      ttsConfig={localConfig.tts}
-                    />
-                  </div>
-                </div>
-              )}
-              {activeTab === 'logging' && (
-                <LoggingConfigForm
-                  value={localConfig.logging}
-                  onChange={(logging) => handleChange({ logging })}
+                <PersonaConfigForm
+                  value={
+                    localConfig.response_mode ??
+                    localConfig.persona ?? { name: 'standard', custom_prompt: '' }
+                  }
+                  onChange={(response_mode) => handleChange({ response_mode })}
                   errors={validationResult.errors}
+                  ttsConfig={localConfig.tts}
+                />
+              )}
+              {activeTab === 'tts' && (
+                <TtsConfigForm
+                  value={localConfig.tts}
+                  onChange={(tts) => handleChange({ tts })}
+                  errors={validationResult.errors}
+                  activePersona={
+                    localConfig.response_mode?.name ??
+                    localConfig.persona?.name ??
+                    'standard'
+                  }
                 />
               )}
             </Card>

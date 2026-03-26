@@ -17,7 +17,7 @@ Design notes:
 
 from __future__ import annotations
 
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -390,6 +390,34 @@ class AudioPushConfig(BaseModel):
     )
 
 
+# ── MQTT Publishing Section ───────────────────────────────────────────────────
+
+class MqttPublishConfig(BaseModel):
+    """MQTT event publishing settings for Home Assistant integration.
+
+    When enabled, VoxWatch publishes structured JSON events to MQTT at
+    each stage of a detection.  Home Assistant users can build automations
+    that react to lights, locks, notifications, and more.
+    """
+
+    enabled: bool = Field(
+        default=True,
+        description="Whether VoxWatch publishes detection events to MQTT.",
+    )
+    topic_prefix: str = Field(
+        default="voxwatch",
+        description="MQTT topic prefix for all VoxWatch events (e.g. 'voxwatch').",
+    )
+    include_ai_analysis: bool = Field(
+        default=True,
+        description="Include AI analysis details (clothing, location) in stage events.",
+    )
+    include_snapshot_url: bool = Field(
+        default=True,
+        description="Include Frigate snapshot URL in detection started events.",
+    )
+
+
 # ── Messages Section ──────────────────────────────────────────────────────────
 
 class MessagesConfig(BaseModel):
@@ -540,6 +568,24 @@ class DispatchConfig(BaseModel):
     )
 
 
+class GuardDogConfig(BaseModel):
+    """Guard Dog persona customization settings.
+
+    Holds the optional dog names injected into guard_dog mode templates and
+    prompt modifiers.  When ``dog_names`` is empty the mode falls back to the
+    generic phrase "the dogs" so all template slots remain grammatically valid.
+    """
+
+    dog_names: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Dog names for the guard_dog persona (0-3 names). "
+            "Empty list means generic 'the dogs'. "
+            "Examples: ['Rex', 'Bruno'], ['Bear']."
+        ),
+    )
+
+
 class PersonaConfig(BaseModel):
     """AI persona / response mode configuration.
 
@@ -584,6 +630,39 @@ class PersonaConfig(BaseModel):
             "the detected person. Keep under 200 words for best results."
         ),
     )
+    mood: str = Field(
+        default="firm",
+        description=(
+            "Mood/attitude modifier for modes that support it (e.g. 'homeowner'). "
+            "Changes the tone and intensity of AI-generated messages. "
+            "One of: 'observant', 'friendly', 'firm', 'confrontational', 'threatening'. "
+            "Ignored by modes that do not implement mood variants."
+        ),
+    )
+    system_name: str = Field(
+        default="",
+        description=(
+            "Custom system name for automated_surveillance mode. "
+            "Injected into prompts and templates as the system identity. "
+            "Empty string means use generic 'Surveillance system'."
+        ),
+    )
+    surveillance_preset: str = Field(
+        default="standard",
+        description=(
+            "Personality preset for automated_surveillance mode. "
+            "One of: 'standard', 't800', 'hal', 'wopr', 'glados'. "
+            "Each preset changes speech patterns, voice, and tone."
+        ),
+    )
+    operator_name: str = Field(
+        default="",
+        description=(
+            "Operator name for live_operator mode. "
+            "When set, the operator introduces themselves by name. "
+            "Empty string means generic 'the operator'."
+        ),
+    )
     dispatch: DispatchConfig = Field(
         default_factory=DispatchConfig,
         description=(
@@ -591,6 +670,10 @@ class PersonaConfig(BaseModel):
             "Only consumed when name is a dispatch mode (e.g. 'police_dispatch'). "
             "Safe to include regardless of active mode — non-dispatch modes ignore it."
         ),
+    )
+    guard_dog: GuardDogConfig = Field(
+        default_factory=GuardDogConfig,
+        description="Guard dog persona customization (dog names).",
     )
 
 
@@ -689,6 +772,14 @@ class VoxWatchConfig(BaseModel):
     logging: LoggingConfig = Field(
         default_factory=LoggingConfig,
         description="Logging configuration",
+    )
+    mqtt_publish: Optional[MqttPublishConfig] = Field(
+        default=None,
+        description=(
+            "MQTT event publishing settings for Home Assistant integration. "
+            "When present and enabled, VoxWatch publishes structured JSON events "
+            "to MQTT at each detection stage. Omit or set enabled: false to disable."
+        ),
     )
 
     @model_validator(mode="after")

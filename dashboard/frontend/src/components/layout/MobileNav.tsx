@@ -31,7 +31,7 @@ const TABS: TabItem[] = [
   { label: 'Dashboard', to: '/',        icon: LayoutDashboard },
   { label: 'Cameras',   to: '/cameras', icon: Camera },
   { label: 'Config',    to: '/config',  icon: Settings },
-  { label: 'Tests',     to: '/tests',   icon: FlaskConical },
+  { label: 'Advanced',  to: '/tests',   icon: FlaskConical },
 ];
 
 /**

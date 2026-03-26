@@ -274,10 +274,10 @@ export function StagesConfigForm({
 
   const defaultMessages: MessagesConfig = messages ?? {
     stage1: 'Attention. You are on private property and are being recorded.',
-    stage2_prefix: 'Individual detected.',
-    stage2_suffix: 'You have been identified and recorded.',
-    stage3_prefix: 'Warning.',
-    stage3_suffix: 'All activity has been recorded and authorities have been notified.',
+    stage2_prefix: '',
+    stage2_suffix: '',
+    stage3_prefix: '',
+    stage3_suffix: '',
   };
 
   // ── Pipeline change helpers ──────────────────────────────────────────────
@@ -387,7 +387,7 @@ export function StagesConfigForm({
         >
           <div className="space-y-3">
             <p className="text-xs text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 rounded px-3 py-2">
-              Uses your Response Mode's default message. AI description is NOT needed for this stage.
+              Uses your Personality's default message. AI description is NOT needed for this stage.
             </p>
 
             <Field
@@ -407,14 +407,14 @@ export function StagesConfigForm({
 
             <Field
               label="Message Override (optional)"
-              hint="Leave blank to use the Response Mode's default message."
+              hint="Leave blank to use the Personality's default message."
             >
               <textarea
                 value={initialResponse.message ?? ''}
                 onChange={(e) => updateInitialResponse({ message: e.target.value })}
                 rows={2}
                 className={cn(inputCls(false), 'resize-y')}
-                placeholder="Leave blank to use response mode default..."
+                placeholder="Leave blank to use personality default..."
               />
             </Field>
 
@@ -564,7 +564,7 @@ export function StagesConfigForm({
                       })
                     }
                     className={inputCls(false)}
-                    placeholder="Individual detected."
+                    placeholder="Optional — personality handles this by default"
                   />
                 </Field>
                 <Field label="Suffix (after AI description)">
@@ -579,7 +579,7 @@ export function StagesConfigForm({
                       })
                     }
                     className={inputCls(false)}
-                    placeholder="You have been identified."
+                    placeholder="Optional — personality handles this by default"
                   />
                 </Field>
               </div>

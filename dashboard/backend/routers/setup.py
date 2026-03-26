@@ -580,12 +580,14 @@ def _probe_mqtt_sync(
     port: int,
     username: str,
     password: str,
-) -> bool:
-    """Synchronously probe an MQTT broker with a short timeout.
+) -> dict:
+    """Synchronously probe an MQTT broker — checks TCP connectivity AND auth.
 
-    Uses paho-mqtt's synchronous connect to test TCP reachability and (if
-    credentials are provided) authentication.  Intended to be called via
-    ``asyncio.to_thread`` to avoid blocking the event loop.
+    Uses paho-mqtt's synchronous connect and then runs the network loop
+    briefly to receive the CONNACK packet.  This catches authentication
+    failures that the old TCP-only check missed.
+
+    Intended to be called via ``asyncio.to_thread``.
 
     Args:
         host:     MQTT broker hostname or IP.
@@ -594,31 +596,77 @@ def _probe_mqtt_sync(
         password: MQTT password (empty string for anonymous).
 
     Returns:
-        True if the broker accepted the connection, False otherwise.
+        Dict with ``ok`` (bool), ``error`` (str or None).
     """
+    import threading
+
+    connack_event = threading.Event()
+    result: dict = {"ok": False, "error": None}
+
+    # MQTT CONNACK reason codes
+    _CONNACK_ERRORS = {
+        1: "Unsupported protocol version",
+        2: "Client identifier rejected",
+        3: "MQTT broker unavailable",
+        4: "Bad username or password",
+        5: "Not authorized",
+    }
+
+    def on_connect_v1(_client, _userdata, _flags, rc):
+        """Paho v1 on_connect callback."""
+        if rc == 0:
+            result["ok"] = True
+        else:
+            result["error"] = _CONNACK_ERRORS.get(rc, f"Connection refused (code {rc})")
+        connack_event.set()
+
+    def on_connect_v2(_client, _userdata, _flags, rc, _properties=None):
+        """Paho v2 on_connect callback (extra properties arg)."""
+        # paho v2 may pass rc as a ReasonCode object
+        rc_int = int(rc) if not isinstance(rc, int) else rc
+        if rc_int == 0:
+            result["ok"] = True
+        else:
+            result["error"] = _CONNACK_ERRORS.get(rc_int, f"Connection refused (code {rc_int})")
+        connack_event.set()
+
     try:
         import paho.mqtt.client as mqtt
 
         try:
             client = mqtt.Client()
+            client.on_connect = on_connect_v1
         except TypeError:
-            # paho-mqtt v2 requires CallbackAPIVersion
             from paho.mqtt.enums import CallbackAPIVersion
             client = mqtt.Client(
                 callback_api_version=CallbackAPIVersion.VERSION2
             )
+            client.on_connect = on_connect_v2
 
         if username:
             client.username_pw_set(username, password)
 
-        # connect() raises on TCP failure; timeout controls socket-level wait
+        # connect() raises on TCP failure
         client.connect(host, port, keepalive=_MQTT_PROBE_TIMEOUT_SECONDS)
-        client.disconnect()
-        return True
+
+        # Run the network loop to receive the CONNACK
+        client.loop_start()
+        got_connack = connack_event.wait(timeout=_MQTT_PROBE_TIMEOUT_SECONDS)
+        client.loop_stop()
+
+        if not got_connack:
+            result["error"] = "Timeout waiting for MQTT broker response"
+
+        try:
+            client.disconnect()
+        except Exception:
+            pass
+
+        return result
 
     except Exception as exc:
         logger.debug("MQTT probe failed for %s:%d — %s", host, port, exc)
-        return False
+        return {"ok": False, "error": str(exc)}
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -787,7 +835,11 @@ async def probe_services(req: ProbeRequest) -> ProbeResult:
 
     frigate_reachable, frigate_version, frigate_cameras, mqtt_host_detected, mqtt_port_detected = frigate_result
     go2rtc_reachable, go2rtc_version, go2rtc_streams, backchannel_info = go2rtc_result
-    mqtt_reachable: bool = bool(mqtt_result)
+    mqtt_reachable: bool = mqtt_result.get("ok", False) if isinstance(mqtt_result, dict) else bool(mqtt_result)
+    mqtt_error: str | None = mqtt_result.get("error") if isinstance(mqtt_result, dict) else None
+    if mqtt_error:
+        errors.append(f"MQTT: {mqtt_error}")
+        logger.warning("MQTT probe: %s", mqtt_error)
 
     # ── Cross-reference backchannel data with camera compatibility DB ──────
     # Some cameras advertise a backchannel in their SDP (because they have an
@@ -866,6 +918,148 @@ async def probe_services(req: ProbeRequest) -> ProbeResult:
         errors=errors,
         probe_duration_ms=probe_duration_ms,
     )
+
+
+# ── Service test endpoints ────────────────────────────────────────────────────
+# Lightweight single-service connectivity tests for the config editor.
+# Unlike /probe (which runs all three concurrently during setup), these
+# test one service at a time using config from the request body.
+
+
+class TestServiceRequest(BaseModel):
+    """Request body for single-service test endpoints."""
+
+    host: str = Field(description="Service hostname or IP address.")
+    port: int = Field(description="Service port number.")
+    username: str = Field(default="", description="Username (MQTT only).")
+    password: str = Field(default="", description="Password (MQTT only).")
+
+
+class TestServiceResult(BaseModel):
+    """Response from a single-service test endpoint."""
+
+    ok: bool = Field(description="True if the service responded successfully.")
+    message: str = Field(description="Human-readable result description.")
+    version: Optional[str] = Field(
+        default=None, description="Service version if detected."
+    )
+    latency_ms: Optional[int] = Field(
+        default=None, description="Round-trip time in milliseconds."
+    )
+
+
+@router.post(
+    "/test-frigate",
+    response_model=TestServiceResult,
+    summary="Test Frigate NVR connectivity",
+    description="Checks if Frigate is reachable at the given host and port.",
+)
+async def test_frigate(req: TestServiceRequest) -> TestServiceResult:
+    """Test Frigate NVR connectivity by hitting /api/version."""
+    t0 = time.monotonic()
+    try:
+        timeout = aiohttp.ClientTimeout(total=5)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            url = f"http://{req.host}:{req.port}/api/version"
+            async with session.get(url) as resp:
+                latency = int((time.monotonic() - t0) * 1000)
+                if resp.status == 200:
+                    version = (await resp.text()).strip().strip('"')
+                    return TestServiceResult(
+                        ok=True,
+                        message=f"Frigate is reachable (v{version})",
+                        version=version,
+                        latency_ms=latency,
+                    )
+                return TestServiceResult(
+                    ok=False,
+                    message=f"Frigate returned HTTP {resp.status}",
+                    latency_ms=latency,
+                )
+    except Exception as exc:
+        latency = int((time.monotonic() - t0) * 1000)
+        return TestServiceResult(
+            ok=False,
+            message=f"Cannot reach Frigate: {exc}",
+            latency_ms=latency,
+        )
+
+
+@router.post(
+    "/test-mqtt",
+    response_model=TestServiceResult,
+    summary="Test MQTT broker connectivity and authentication",
+    description=(
+        "Connects to the MQTT broker and waits for CONNACK to verify "
+        "both TCP connectivity and authentication credentials."
+    ),
+)
+async def test_mqtt(req: TestServiceRequest) -> TestServiceResult:
+    """Test MQTT broker connectivity including authentication."""
+    t0 = time.monotonic()
+    result = await asyncio.to_thread(
+        _probe_mqtt_sync, req.host, req.port, req.username, req.password
+    )
+    latency = int((time.monotonic() - t0) * 1000)
+
+    if result.get("ok"):
+        return TestServiceResult(
+            ok=True,
+            message="MQTT broker connected and authenticated successfully",
+            latency_ms=latency,
+        )
+    error = result.get("error", "Unknown error")
+    return TestServiceResult(
+        ok=False,
+        message=f"MQTT connection failed: {error}",
+        latency_ms=latency,
+    )
+
+
+@router.post(
+    "/test-go2rtc",
+    response_model=TestServiceResult,
+    summary="Test go2rtc media server connectivity",
+    description="Checks if go2rtc is reachable at the given host and port.",
+)
+async def test_go2rtc(req: TestServiceRequest) -> TestServiceResult:
+    """Test go2rtc connectivity by hitting /api."""
+    t0 = time.monotonic()
+    try:
+        timeout = aiohttp.ClientTimeout(total=5)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            url = f"http://{req.host}:{req.port}/api"
+            async with session.get(url) as resp:
+                latency = int((time.monotonic() - t0) * 1000)
+                if resp.status == 200:
+                    # Try to extract version from response
+                    version = None
+                    try:
+                        data = await resp.json()
+                        version = data.get("version") if isinstance(data, dict) else None
+                    except Exception:
+                        pass
+                    msg = f"go2rtc is reachable"
+                    if version:
+                        msg += f" (v{version})"
+                    return TestServiceResult(
+                        ok=True,
+                        message=msg,
+                        version=version,
+                        latency_ms=latency,
+                    )
+                return TestServiceResult(
+                    ok=False,
+                    message=f"go2rtc returned HTTP {resp.status}",
+                    latency_ms=latency,
+                )
+    except Exception as exc:
+        latency = int((time.monotonic() - t0) * 1000)
+        return TestServiceResult(
+            ok=False,
+            message=f"Cannot reach go2rtc: {exc}",
+            latency_ms=latency,
+        )
 
 
 @router.post(

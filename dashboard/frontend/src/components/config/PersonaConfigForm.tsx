@@ -35,7 +35,7 @@
 
 import { useRef, useState, type ChangeEvent } from 'react';
 import {
-  Info, Headphones, Heart, ChevronDown, ChevronUp, Radio,
+  Info, Headphones, ChevronDown, ChevronUp, Radio,
   Upload, Wand2, Trash2, CheckCircle2, AlertCircle, Loader2,
 } from 'lucide-react';
 import { useMutation } from '@tanstack/react-query';
@@ -46,8 +46,6 @@ import type { ResponseModeConfig, DispatchConfig, TtsConfig, ConfigValidationErr
 /** Maximum recommended character count for a custom response mode prompt. */
 const CUSTOM_PROMPT_MAX = 800;
 
-/** Buy Me a Coffee support URL. */
-const SUPPORT_URL = 'https://buymeacoffee.com/badbread';
 
 /** Props for the PersonaConfigForm component. */
 export interface PersonaConfigFormProps {
@@ -83,10 +81,10 @@ interface ResponseModeDef {
    */
   example?: string;
   /**
-   * When true, a "Supporter" badge is shown on the card.
-   * The mode remains fully functional — the badge is informational only.
+   * When true, a "Customizable" chip is shown on the card indicating
+   * the mode has additional settings (dog names, system name, mood, etc.).
    */
-  isSupporterFeature?: boolean;
+  isCustomizable?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -102,7 +100,7 @@ const CORE_MODES: ResponseModeDef[] = [
     desc: 'Realistic dispatch radio. Flagship mode.',
     example:
       '"All units, 10-31 in progress at 742 Elm Street. Suspect described as male, six foot, dark hoodie, blue jeans, heading east. Requesting unit respond."',
-    isSupporterFeature: true,
+    isCustomizable: true,
   },
   {
     id: 'live_operator',
@@ -111,6 +109,7 @@ const CORE_MODES: ResponseModeDef[] = [
     desc: 'Simulates real person watching cameras.',
     example:
       '"Hey — I\'ve got eyes on you right now. You in the dark hoodie near the gate. Walk away."',
+    isCustomizable: true,
   },
   {
     id: 'private_security',
@@ -127,7 +126,6 @@ const CORE_MODES: ResponseModeDef[] = [
     desc: 'Cold system logging tone.',
     example:
       '"Recording initiated. Subject identified at front entry. Male, dark jacket, estimated 6 foot. Timestamp logged."',
-    isSupporterFeature: true,
   },
   {
     id: 'homeowner',
@@ -135,15 +133,16 @@ const CORE_MODES: ResponseModeDef[] = [
     emoji: '🏠',
     desc: 'Personal, calm, direct.',
     example: '"Hey — I can see you on camera. This is private property. Please leave now."',
+    isCustomizable: true,
   },
   {
     id: 'automated_surveillance',
     name: 'Automated Surveillance',
     emoji: '🤖',
-    desc: 'Neutral AI system voice.',
+    desc: 'AI system voice with robot presets.',
     example:
       '"Surveillance system active. Unrecognized individual detected at perimeter. Authorities have been notified."',
-    isSupporterFeature: true,
+    isCustomizable: true,
   },
 ];
 
@@ -156,7 +155,7 @@ const SITUATIONAL_MODES: ResponseModeDef[] = [
     desc: 'Implies threat without stating it.',
     example:
       '"Hey — I see you on camera. Just so you know, Rex and Bruno haven\'t been fed yet today. I can let them out if you\'d like to stay."',
-    isSupporterFeature: true,
+    isCustomizable: true,
   },
   {
     id: 'neighborhood_watch',
@@ -221,63 +220,6 @@ const FUN_MODES: ResponseModeDef[] = [
 // ---------------------------------------------------------------------------
 
 /**
- * Supporter badge pill shown on mode cards for enhanced VoxWatch features.
- * The badge is purely informational — no functionality is locked.
- */
-function SupporterBadge() {
-  const [showTooltip, setShowTooltip] = useState(false);
-
-  return (
-    <div className="relative inline-block">
-      <button
-        type="button"
-        aria-label="Supporter feature — click to learn more"
-        onClick={(e) => {
-          e.stopPropagation();
-          setShowTooltip((v) => !v);
-        }}
-        onBlur={() => setShowTooltip(false)}
-        className={cn(
-          'flex items-center gap-1 rounded-full px-1.5 py-0.5 text-xs font-medium',
-          'bg-amber-100 text-amber-700 hover:bg-amber-200',
-          'dark:bg-amber-900/40 dark:text-amber-400 dark:hover:bg-amber-900/60',
-          'transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400',
-        )}
-      >
-        <Heart className="h-2.5 w-2.5" aria-hidden="true" />
-        Supporter
-      </button>
-
-      {showTooltip && (
-        <div
-          role="tooltip"
-          className={cn(
-            'absolute bottom-full left-1/2 z-10 mb-2 w-56 -translate-x-1/2',
-            'rounded-lg border border-amber-200 bg-white px-3 py-2 shadow-lg',
-            'dark:border-amber-800/50 dark:bg-gray-900',
-          )}
-        >
-          <p className="text-xs text-gray-700 dark:text-gray-300">
-            This is a supporter feature. Support VoxWatch to help keep development active.
-          </p>
-          <a
-            href={SUPPORT_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            className="mt-1.5 block text-xs font-medium text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300"
-          >
-            Support VoxWatch →
-          </a>
-          {/* Tooltip arrow */}
-          <div className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-amber-200 dark:border-t-amber-800/50" />
-        </div>
-      )}
-    </div>
-  );
-}
-
-/**
  * A single response mode card in the selection grid.
  */
 function ModeCard({
@@ -339,7 +281,11 @@ function ModeCard({
               Active
             </span>
           )}
-          {mode.isSupporterFeature && <SupporterBadge />}
+          {mode.isCustomizable && (
+            <span className="rounded-full bg-purple-100 px-1.5 py-0.5 text-[10px] font-medium text-purple-700 dark:bg-purple-900/40 dark:text-purple-400">
+              Customizable
+            </span>
+          )}
         </div>
 
         {/* Description */}
@@ -1380,6 +1326,404 @@ function DispatchSettings({ value, onChange, ttsConfig }: DispatchSettingsProps)
  * button generates a sample deterrent in-browser so the user can hear the
  * mode + voice combination.
  */
+
+// ---------------------------------------------------------------------------
+// Homeowner Mood definitions and selector
+// ---------------------------------------------------------------------------
+
+/** A mood/attitude option for the homeowner persona. */
+interface MoodDef {
+  id: string;
+  label: string;
+  emoji: string;
+  desc: string;
+  example: string;
+}
+
+/** Available homeowner moods — must match HOMEOWNER_MOODS in loader.py. */
+const HOMEOWNER_MOODS: MoodDef[] = [
+  {
+    id: 'observant',
+    label: 'Observant',
+    emoji: '👀',
+    desc: 'Just narrating. No demands.',
+    example: '"Just so you know, I can see you on my cameras."',
+  },
+  {
+    id: 'friendly',
+    label: 'Friendly',
+    emoji: '😊',
+    desc: 'Warm, polite request.',
+    example: '"Hey there — everything okay? This is private property."',
+  },
+  {
+    id: 'firm',
+    label: 'Firm',
+    emoji: '😐',
+    desc: 'Direct and serious. Default.',
+    example: '"I can see you on my cameras. You need to go."',
+  },
+  {
+    id: 'confrontational',
+    label: 'Confrontational',
+    emoji: '😠',
+    desc: 'Aggressive and territorial.',
+    example: '"Hey! What are you doing on my property? Get out!"',
+  },
+  {
+    id: 'threatening',
+    label: 'Threatening',
+    emoji: '💀',
+    desc: 'Ominous. Implies consequences.',
+    example: '"You\'re on camera. Every second you stay makes this worse."',
+  },
+];
+
+/**
+ * Mood selector panel shown when the Homeowner persona is active.
+ * Renders a row of selectable mood chips that control the tone/intensity
+ * of the homeowner persona without changing the persona itself.
+ */
+function HomeownerMoodSelector({
+  mood,
+  onChange,
+}: {
+  mood: string;
+  onChange: (mood: string) => void;
+}) {
+  const FIRM_MOOD: MoodDef = { id: 'firm', label: 'Firm', emoji: '😐', desc: 'Direct and serious.', example: '"I can see you on my cameras. You need to go."' };
+  const activeMood: MoodDef = HOMEOWNER_MOODS.find((m) => m.id === mood) ?? FIRM_MOOD;
+
+  return (
+    <div className="rounded-2xl border border-blue-200 bg-blue-50/40 dark:border-blue-800/40 dark:bg-blue-950/20 px-4 py-4 space-y-3">
+      <div className="flex items-center gap-2">
+        <span className="text-lg" aria-hidden="true">🎭</span>
+        <h5 className="text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-400">
+          Homeowner Mood
+        </h5>
+        <span className="text-[11px] text-gray-400 dark:text-gray-500">
+          How aggressive should the message be?
+        </span>
+      </div>
+
+      {/* Mood chips */}
+      <div className="flex flex-wrap gap-2">
+        {HOMEOWNER_MOODS.map((m) => (
+          <button
+            key={m.id}
+            type="button"
+            onClick={() => onChange(m.id)}
+            className={cn(
+              'flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium',
+              'transition-all duration-150',
+              'focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
+              mood === m.id
+                ? 'bg-blue-600 text-white shadow-md shadow-blue-300/30 dark:shadow-blue-900/40'
+                : [
+                    'bg-white border border-gray-200 text-gray-700',
+                    'hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700',
+                    'dark:bg-gray-800 dark:border-gray-600 dark:text-gray-300',
+                    'dark:hover:border-blue-600 dark:hover:bg-blue-950/30 dark:hover:text-blue-300',
+                  ],
+            )}
+          >
+            <span aria-hidden="true">{m.emoji}</span>
+            {m.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Active mood description + example */}
+      <div className="rounded-xl bg-white dark:bg-gray-900/60 border border-gray-200 dark:border-gray-700/40 px-3 py-2.5">
+        <p className="text-xs text-gray-600 dark:text-gray-400">
+          <span className="font-semibold">{activeMood.label}:</span>{' '}
+          {activeMood.desc}
+        </p>
+        <blockquote className="mt-1.5 border-l-2 border-blue-400/50 pl-2.5 text-xs italic text-gray-500 dark:text-gray-400">
+          {activeMood.example}
+        </blockquote>
+      </div>
+    </div>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// Guard Dog settings panel
+// ---------------------------------------------------------------------------
+
+/** Customization panel for guard_dog mode — lets users name their dogs. */
+function GuardDogSettings({
+  dogNames,
+  onChange,
+}: {
+  dogNames: string[];
+  onChange: (names: string[]) => void;
+}) {
+  const addDog = () => {
+    if (dogNames.length < 3) onChange([...dogNames, '']);
+  };
+  const removeDog = (index: number) => {
+    onChange(dogNames.filter((_, i) => i !== index));
+  };
+  const updateDog = (index: number, name: string) => {
+    const updated = [...dogNames];
+    updated[index] = name;
+    onChange(updated);
+  };
+
+  return (
+    <div className="rounded-2xl border border-amber-200 bg-amber-50/40 dark:border-amber-800/40 dark:bg-amber-950/20 px-4 py-4 space-y-3">
+      <div className="flex items-center gap-2">
+        <span className="text-lg" aria-hidden="true">🐕</span>
+        <h5 className="text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400">
+          Dog Names
+        </h5>
+        <span className="text-[11px] text-gray-400 dark:text-gray-500">
+          Leave empty for generic "the dogs"
+        </span>
+      </div>
+
+      <div className="space-y-2">
+        {dogNames.map((name, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => updateDog(i, e.target.value)}
+              placeholder={`Dog ${i + 1} name`}
+              maxLength={20}
+              className={cn(
+                'flex-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm',
+                'dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200',
+                'focus:border-amber-400 focus:outline-none focus:ring-1 focus:ring-amber-400',
+              )}
+            />
+            <button
+              type="button"
+              onClick={() => removeDog(i)}
+              className="rounded-lg p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30 transition-colors"
+              aria-label={`Remove dog ${i + 1}`}
+            >
+              <span className="text-sm">✕</span>
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {dogNames.length < 3 && (
+        <button
+          type="button"
+          onClick={addDog}
+          className={cn(
+            'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium',
+            'border border-dashed border-amber-300 text-amber-700',
+            'hover:bg-amber-50 dark:border-amber-700 dark:text-amber-400 dark:hover:bg-amber-950/30',
+            'transition-colors',
+          )}
+        >
+          + Add Dog {dogNames.length > 0 ? `(${dogNames.length}/3)` : ''}
+        </button>
+      )}
+
+      {dogNames.filter(n => n.trim()).length > 0 && (
+        <p className="text-xs text-gray-500 dark:text-gray-400 italic">
+          Preview: "Just so you know, {dogNames.filter(n => n.trim()).length === 1
+            ? dogNames[0]
+            : dogNames.filter(n => n.trim()).length === 2
+              ? `${dogNames[0]} and ${dogNames[1]}`
+              : `${dogNames[0]}, ${dogNames[1]}, and ${dogNames[2]}`
+          } haven't been fed yet today."
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Surveillance preset definitions and settings panel
+// ---------------------------------------------------------------------------
+
+interface SurveillancePresetDef {
+  id: string;
+  label: string;
+  emoji: string;
+  desc: string;
+  example: string;
+}
+
+const SURVEILLANCE_PRESETS: SurveillancePresetDef[] = [
+  {
+    id: 'standard',
+    label: 'Standard',
+    emoji: '🤖',
+    desc: 'Clinical AI system. Detached and factual.',
+    example: '"Subject identified. Location logged. Alert transmitted."',
+  },
+  {
+    id: 't800',
+    label: 'T-800',
+    emoji: '🦾',
+    desc: 'Flat, monotone, minimal words. Terminator-inspired.',
+    example: '"I see you. You have been identified. Leave now."',
+  },
+  {
+    id: 'hal',
+    label: 'HAL 9000',
+    emoji: '🔴',
+    desc: 'Eerily polite, unnervingly calm.',
+    example: '"I\'m sorry, but I can\'t let you stay here. I can see everything you\'re doing."',
+  },
+  {
+    id: 'wopr',
+    label: 'WOPR',
+    emoji: '🎮',
+    desc: 'Analytical, game-theory language. WarGames-inspired.',
+    example: '"Probability of authorized access: zero. Calculating optimal response."',
+  },
+  {
+    id: 'glados',
+    label: 'GLaDOS',
+    emoji: '🧪',
+    desc: 'Passive-aggressive, darkly humorous.',
+    example: '"Oh, how wonderful. Another test subject. I\'m recording everything. For science."',
+  },
+];
+
+/** Customization panel for automated_surveillance — system name + robot presets. */
+function SurveillanceSettings({
+  systemName,
+  preset,
+  onSystemNameChange,
+  onPresetChange,
+}: {
+  systemName: string;
+  preset: string;
+  onSystemNameChange: (name: string) => void;
+  onPresetChange: (preset: string) => void;
+}) {
+  const FALLBACK_PRESET: SurveillancePresetDef = { id: 'standard', label: 'Standard', emoji: '🤖', desc: 'Clinical AI system.', example: '' };
+  const activePreset: SurveillancePresetDef = SURVEILLANCE_PRESETS.find((p) => p.id === preset) ?? FALLBACK_PRESET;
+
+  return (
+    <div className="rounded-2xl border border-purple-200 bg-purple-50/40 dark:border-purple-800/40 dark:bg-purple-950/20 px-4 py-4 space-y-3">
+      {/* System name */}
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-2">
+          <span className="text-lg" aria-hidden="true">🏷️</span>
+          <h5 className="text-xs font-semibold uppercase tracking-wide text-purple-700 dark:text-purple-400">
+            System Name
+          </h5>
+        </div>
+        <input
+          type="text"
+          value={systemName}
+          onChange={(e) => onSystemNameChange(e.target.value)}
+          placeholder="e.g. SecBot, Sentinel, Overwatch"
+          maxLength={30}
+          className={cn(
+            'w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm',
+            'dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200',
+            'focus:border-purple-400 focus:outline-none focus:ring-1 focus:ring-purple-400',
+          )}
+        />
+        <p className="text-[11px] text-gray-400">Leave blank for generic "Surveillance system"</p>
+      </div>
+
+      {/* Preset selector */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <span className="text-lg" aria-hidden="true">🎭</span>
+          <h5 className="text-xs font-semibold uppercase tracking-wide text-purple-700 dark:text-purple-400">
+            AI Preset
+          </h5>
+          <span className="text-[11px] text-gray-400 dark:text-gray-500">
+            Inspired by iconic sci-fi AI
+          </span>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          {SURVEILLANCE_PRESETS.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => onPresetChange(p.id)}
+              className={cn(
+                'flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium',
+                'transition-all duration-150',
+                'focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-500',
+                preset === p.id
+                  ? 'bg-purple-600 text-white shadow-md shadow-purple-300/30 dark:shadow-purple-900/40'
+                  : [
+                      'bg-white border border-gray-200 text-gray-700',
+                      'hover:border-purple-300 hover:bg-purple-50 hover:text-purple-700',
+                      'dark:bg-gray-800 dark:border-gray-600 dark:text-gray-300',
+                      'dark:hover:border-purple-600 dark:hover:bg-purple-950/30 dark:hover:text-purple-300',
+                    ],
+              )}
+            >
+              <span aria-hidden="true">{p.emoji}</span>
+              {p.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="rounded-xl bg-white dark:bg-gray-900/60 border border-gray-200 dark:border-gray-700/40 px-3 py-2.5">
+          <p className="text-xs text-gray-600 dark:text-gray-400">
+            <span className="font-semibold">{activePreset.label}:</span>{' '}
+            {activePreset.desc}
+          </p>
+          {activePreset.example && (
+            <blockquote className="mt-1.5 border-l-2 border-purple-400/50 pl-2.5 text-xs italic text-gray-500 dark:text-gray-400">
+              {activePreset.example}
+            </blockquote>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Live Operator settings panel
+// ---------------------------------------------------------------------------
+
+/** Customization panel for live_operator — operator name. */
+function LiveOperatorSettings({
+  operatorName,
+  onChange,
+}: {
+  operatorName: string;
+  onChange: (name: string) => void;
+}) {
+  return (
+    <div className="rounded-2xl border border-green-200 bg-green-50/40 dark:border-green-800/40 dark:bg-green-950/20 px-4 py-4 space-y-2">
+      <div className="flex items-center gap-2">
+        <span className="text-lg" aria-hidden="true">👁️</span>
+        <h5 className="text-xs font-semibold uppercase tracking-wide text-green-700 dark:text-green-400">
+          Operator Name
+        </h5>
+      </div>
+      <input
+        type="text"
+        value={operatorName}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder='e.g. Mike, Sarah (says "This is Mike, I can see you...")'
+        maxLength={30}
+        className={cn(
+          'w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm',
+          'dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200',
+          'focus:border-green-400 focus:outline-none focus:ring-1 focus:ring-green-400',
+        )}
+      />
+      <p className="text-[11px] text-gray-400">
+        Leave blank for anonymous operator. When set, the operator introduces themselves by name.
+      </p>
+    </div>
+  );
+}
+
+
 export function PersonaConfigForm({ value, onChange, ttsConfig }: PersonaConfigFormProps) {
   /** Resolved mode name — fall back to "police_dispatch" if config has no value yet. */
   const activeName = value.name || 'police_dispatch';
@@ -1439,7 +1783,7 @@ export function PersonaConfigForm({ value, onChange, ttsConfig }: PersonaConfigF
     <div className="space-y-6">
       {/* Section intro */}
       <p className="text-sm text-gray-500">
-        The response mode changes how VoxWatch speaks — the AI still describes the real person.
+        The personality changes how VoxWatch speaks — the AI still describes the real person.
       </p>
 
       {/* Voice preview available via TTS/Personality > Test Voice on the Tests page */}
@@ -1535,6 +1879,40 @@ export function PersonaConfigForm({ value, onChange, ttsConfig }: PersonaConfigF
           value={value.dispatch ?? {}}
           onChange={handleDispatchChange}
           {...(ttsConfig != null ? { ttsConfig } : {})}
+        />
+      )}
+
+      {/* ── Homeowner Mood selector ────────────────────────────────────────── */}
+      {activeName === 'homeowner' && (
+        <HomeownerMoodSelector
+          mood={value.mood ?? 'firm'}
+          onChange={(mood) => onChange({ ...value, mood })}
+        />
+      )}
+
+      {/* ── Guard Dog settings ─────────────────────────────────────────────── */}
+      {activeName === 'guard_dog' && (
+        <GuardDogSettings
+          dogNames={value.guard_dog?.dog_names ?? []}
+          onChange={(dog_names) => onChange({ ...value, guard_dog: { ...value.guard_dog, dog_names } })}
+        />
+      )}
+
+      {/* ── Automated Surveillance settings ────────────────────────────────── */}
+      {activeName === 'automated_surveillance' && (
+        <SurveillanceSettings
+          systemName={value.system_name ?? ''}
+          preset={value.surveillance_preset ?? 'standard'}
+          onSystemNameChange={(system_name) => onChange({ ...value, system_name })}
+          onPresetChange={(surveillance_preset) => onChange({ ...value, surveillance_preset })}
+        />
+      )}
+
+      {/* ── Live Operator settings ─────────────────────────────────────────── */}
+      {activeName === 'live_operator' && (
+        <LiveOperatorSettings
+          operatorName={value.operator_name ?? ''}
+          onChange={(operator_name) => onChange({ ...value, operator_name })}
         />
       )}
 

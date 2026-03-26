@@ -128,6 +128,57 @@ async def list_cameras() -> List[CameraStatus]:
 
     await asyncio.gather(_fetch_frigate(), _fetch_backchannel())
 
+    # ── Cross-reference camera DB for backchannel cameras ─────────────────
+    # go2rtc reports backchannel support based on RTSP stream capabilities,
+    # but some cameras (e.g. Dahua IPC-T54IR-AS) have an RCA audio *jack*
+    # without a built-in speaker.  The camera_db knows which models actually
+    # have speakers.  We do parallel ONVIF probes for cameras that go2rtc
+    # says have backchannel, then override has_backchannel=False for cameras
+    # whose model is in the DB but lacks a built-in speaker.
+    from backend.camera_db import SPEAKER_BUILTIN
+
+    # Identify cameras needing a DB cross-reference (backchannel detected)
+    bc_cameras = [
+        name for name, bc in backchannel_info.items()
+        if bc and bc.get("has_backchannel")
+    ]
+
+    # Results from ONVIF probe + camera_db lookup, keyed by camera name
+    speaker_overrides: Dict[str, Dict[str, Any]] = {}
+
+    async def _identify_speaker(cam_name: str) -> None:
+        """ONVIF-probe a camera and cross-reference the camera DB.
+
+        If the camera model is known and lacks a built-in speaker, store
+        an override entry so has_backchannel can be set to False.
+        """
+        try:
+            cam_ip, rtsp_creds = await _resolve_camera_ip(cam_name)
+            if not cam_ip:
+                return
+            onvif_result = await _probe_onvif(cam_ip, rtsp_creds)
+            if not onvif_result:
+                return
+            model = onvif_result.get("model", "")
+            db_entry = match_camera_model(model) if model else None
+            if not db_entry:
+                return
+            speaker_overrides[cam_name] = {
+                "camera_model": model,
+                "camera_manufacturer": db_entry.get("manufacturer"),
+                "speaker_status": db_entry.get("speaker_type", "unknown"),
+                "compatibility_notes": db_entry.get("notes"),
+                "no_builtin_speaker": db_entry.get("speaker_type") != SPEAKER_BUILTIN,
+            }
+        except Exception:
+            pass  # best-effort — don't block the camera list
+
+    if bc_cameras:
+        await asyncio.gather(
+            *[_identify_speaker(name) for name in bc_cameras],
+            return_exceptions=True,
+        )
+
     # Build a merged set of all camera names
     all_names = set(frigate_cameras.keys()) | set(voxwatch_cameras.keys())
 
@@ -155,10 +206,27 @@ async def list_cameras() -> List[CameraStatus]:
 
         # Enrich with go2rtc backchannel (two-way audio) capability
         bc = backchannel_info.get(name, {})
+        has_bc = bc.get("has_backchannel", False) if bc else False
+        bc_codecs = bc.get("codecs") or None
+
+        # Apply camera DB override: if the model is known and has no
+        # built-in speaker, mark backchannel as unavailable and populate
+        # speaker_status so the frontend can show the correct state.
+        override = speaker_overrides.get(name)
+        extra_fields: Dict[str, Any] = {}
+        if override:
+            extra_fields["camera_model"] = override["camera_model"]
+            extra_fields["camera_manufacturer"] = override["camera_manufacturer"]
+            extra_fields["speaker_status"] = override["speaker_status"]
+            extra_fields["compatibility_notes"] = override["compatibility_notes"]
+            if override["no_builtin_speaker"]:
+                has_bc = False
+
         cam_status = cam_status.model_copy(
             update={
-                "has_backchannel": bc.get("has_backchannel", False) if bc else False,
-                "backchannel_codecs": bc.get("codecs") or None,
+                "has_backchannel": has_bc,
+                "backchannel_codecs": bc_codecs,
+                **extra_fields,
             }
         )
 

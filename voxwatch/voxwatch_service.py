@@ -81,6 +81,7 @@ from voxwatch.radio_dispatch import (
     compose_dispatch_audio,
     segment_dispatch_message,
 )
+from voxwatch.mqtt_publisher import VoxWatchPublisher
 from voxwatch.telemetry import (
     append_event_log,
     ensure_camera_stats,
@@ -196,6 +197,7 @@ class VoxWatchService:
         self._audio = AudioPipeline(config)
         self._loop: asyncio.AbstractEventLoop | None = None
         self._mqtt_client: mqtt.Client | None = None
+        self._publisher: VoxWatchPublisher | None = None
         # camera_name -> UNIX monotonic timestamp of last successful trigger
         self._cooldowns: dict[str, float] = {}
         self._running = False
@@ -274,6 +276,15 @@ class VoxWatchService:
             self._running = False
             self._audio.shutdown()
             return
+
+        # Initialize the MQTT event publisher for Home Assistant integration.
+        publish_cfg = self.config.get("mqtt_publish", {})
+        if publish_cfg.get("enabled", True) and self._mqtt_client:
+            self._publisher = VoxWatchPublisher(self._mqtt_client, publish_cfg)
+            self._publisher.publish_online()
+        else:
+            self._publisher = None
+            logger.info("MQTT event publishing is disabled.")
 
         # Start the background task that periodically writes /data/status.json.
         # Named tasks show up more clearly in asyncio debug output.
@@ -358,6 +369,13 @@ class VoxWatchService:
         logger.info("Shutdown requested — stopping VoxWatch service...")
         self._running = False
 
+        # Publish offline status before disconnecting.
+        if self._publisher:
+            try:
+                self._publisher.publish_offline()
+            except Exception:
+                pass
+
         if self._mqtt_client:
             # loop_stop() ends the paho background thread; disconnect() sends
             # a clean DISCONNECT packet to the broker.
@@ -409,6 +427,15 @@ class VoxWatchService:
         client.on_connect = self._on_mqtt_connect
         client.on_disconnect = self._on_mqtt_disconnect
         client.on_message = self._on_mqtt_message
+
+        # Configure MQTT Last Will and Testament for online/offline status.
+        # If VoxWatch disconnects unexpectedly, the broker publishes "offline".
+        publish_cfg = self.config.get("mqtt_publish", {})
+        if publish_cfg.get("enabled", True):
+            lwt_prefix = publish_cfg.get("topic_prefix", "voxwatch").rstrip("/")
+            client.will_set(
+                f"{lwt_prefix}/status", "offline", qos=1, retain=True
+            )
 
         try:
             client.connect(mqtt_host, mqtt_port, keepalive=60)
@@ -715,6 +742,19 @@ class VoxWatchService:
             event_id, camera_stream, mode_name,
         )
 
+        # ── MQTT: publish detection_started ────────────────────────────────
+        vw_event_id = ""
+        if self._publisher:
+            frigate_host = self.config.get("frigate", {}).get("host", "localhost")
+            frigate_port = self.config.get("frigate", {}).get("port", 5000)
+            snapshot_url = f"http://{frigate_host}:{frigate_port}/api/events/{event_id}/snapshot.jpg"
+            vw_event_id = self._publisher.publish_detection_started(
+                camera=camera_name,
+                mode=mode_name,
+                frigate_event_id=event_id,
+                snapshot_url=snapshot_url,
+            )
+
         # ── Step A: Backchannel warmup ─────────────────────────────────────
         # Runs concurrently with everything else — goal is for the go2rtc
         # backchannel to be warm before Initial Response TTS is ready.
@@ -747,6 +787,17 @@ class VoxWatchService:
             record_audio_push(self._camera_stats, camera_name, initial_push_ok)
             logger.info("Initial Response: complete (pushed=%s).", initial_push_ok)
 
+            # ── MQTT: publish stage 1 ──────────────────────────────────────
+            if self._publisher:
+                self._publisher.publish_stage(
+                    vw_event_id=vw_event_id,
+                    camera=camera_name,
+                    stage=1,
+                    mode=mode_name,
+                    audio_pushed=_initial_audio_success,
+                    frigate_event_id=event_id,
+                )
+
         # ── Step D: Escalation delay ───────────────────────────────────────
         # Wait the configured delay while AI analysis finishes in background.
         # asyncio.sleep yields control so other events can be processed.
@@ -771,6 +822,18 @@ class VoxWatchService:
             _escalation_audio_success = s_esc_push_ok
             if s_esc_push_ok:
                 record_audio_push(self._camera_stats, camera_name, s_esc_push_ok)
+
+            # ── MQTT: publish stage 2 ──────────────────────────────────────
+            if self._publisher and _escalation_ran:
+                self._publisher.publish_stage(
+                    vw_event_id=vw_event_id,
+                    camera=camera_name,
+                    stage=2,
+                    mode=mode_name,
+                    audio_pushed=_escalation_audio_success,
+                    ai_analysis={"description": _escalation_description} if _escalation_description else None,
+                    frigate_event_id=event_id,
+                )
         else:
             # Escalation disabled — still drain the AI task to avoid orphaned tasks.
             ai_prep_task.cancel()
@@ -783,6 +846,25 @@ class VoxWatchService:
 
         # ── Event log ─────────────────────────────────────────────────────
         total_latency_ms = int((time.monotonic() - _pipeline_start_ts) * 1000)
+
+        # ── MQTT: publish detection_ended ──────────────────────────────────
+        if self._publisher:
+            stages_completed = 1  # stage 1 always fires
+            if _escalation_ran:
+                stages_completed = 2
+            reason = "all_stages_completed"
+            if not _escalation_ran and _escalation_description is None:
+                reason = "person_left"
+            self._publisher.publish_ended(
+                vw_event_id=vw_event_id,
+                camera=camera_name,
+                reason=reason,
+                stages_completed=stages_completed,
+                total_duration_seconds=total_latency_ms / 1000.0,
+                mode=mode_name,
+                frigate_event_id=event_id,
+            )
+
         event_entry: dict[str, Any] = {
             "timestamp": detection_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "event_id": event_id,
@@ -1473,6 +1555,7 @@ class VoxWatchService:
             or new_config.get("persona") != old_config.get("persona")
         )
         conditions_changed = new_config.get("conditions") != old_config.get("conditions")
+        frigate_changed = new_config.get("frigate") != old_config.get("frigate")
 
         old_cameras = set(old_config.get("cameras", {}).keys())
         new_cameras = set(new_config.get("cameras", {}).keys())
@@ -1506,6 +1589,8 @@ class VoxWatchService:
                 changed_parts.append(f"cameras removed: {sorted(removed)}")
             if not added and not removed:
                 changed_parts.append("camera settings changed")
+        if frigate_changed:
+            changed_parts.append("Frigate/MQTT connection settings changed")
 
         if not changed_parts:
             logger.debug("Config file changed but no monitored sections differ — no action taken.")
@@ -1540,12 +1625,46 @@ class VoxWatchService:
                     "Stage 1 re-cache failed (%s) — old audio will be used.", exc
                 )
 
+        # ── Reconnect MQTT if credentials/host changed ────────────────────
+        if frigate_changed and self._mqtt_client:
+            try:
+                logger.info("MQTT settings changed — reconnecting with new credentials...")
+                self._mqtt_client.loop_stop()
+                self._mqtt_client.disconnect()
+                self._mqtt_client = None
+            except Exception as exc:
+                logger.warning("Error disconnecting old MQTT client: %s", exc)
+
+        # Do the atomic config swap FIRST so _connect_mqtt reads new creds
+
         # ── Atomic config swap ───────────────────────────────────────────
         # Hold the lock only for the dict assignment — we don't hold it during
         # the TTS I/O above because that could block detection handlers for
         # many seconds while models load.
         async with self._config_lock:
             self.config = new_config
+
+        # Reconnect MQTT after config swap so _connect_mqtt reads new settings
+        if frigate_changed:
+            try:
+                await self._connect_mqtt()
+                if self._mqtt_client and self._mqtt_client.is_connected():
+                    logger.info("MQTT reconnected successfully with updated settings.")
+                else:
+                    logger.warning("MQTT reconnect initiated — waiting for broker response.")
+            except Exception as exc:
+                logger.warning("MQTT reconnection failed: %s — will retry in background.", exc)
+
+        # Reinitialize MQTT publisher if publish settings changed.
+        mqtt_pub_changed = new_config.get("mqtt_publish") != old_config.get("mqtt_publish")
+        if mqtt_pub_changed:
+            publish_cfg = new_config.get("mqtt_publish", {})
+            if publish_cfg.get("enabled", True) and self._mqtt_client:
+                self._publisher = VoxWatchPublisher(self._mqtt_client, publish_cfg)
+                logger.info("MQTT publisher reinitialized with updated settings.")
+            else:
+                self._publisher = None
+                logger.info("MQTT event publishing disabled.")
 
         # Propagate the new config to the preview API so subsequent preview
         # requests use the updated dispatch address, agency, callsign, etc.
