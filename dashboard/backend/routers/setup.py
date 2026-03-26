@@ -789,6 +789,43 @@ async def probe_services(req: ProbeRequest) -> ProbeResult:
     go2rtc_reachable, go2rtc_version, go2rtc_streams, backchannel_info = go2rtc_result
     mqtt_reachable: bool = bool(mqtt_result)
 
+    # ── Cross-reference backchannel data with camera compatibility DB ──────
+    # Some cameras advertise a backchannel in their SDP (because they have an
+    # RCA audio output) even though they have no built-in speaker.  Our camera
+    # DB knows which models have this issue.  We try a quick ONVIF probe for
+    # each camera to identify the model, then override has_backchannel if the
+    # DB says the camera has no speaker.
+    try:
+        from backend.camera_db import match_camera_model, SPEAKER_BUILTIN
+        from backend.routers.cameras import _resolve_camera_ip, _probe_onvif
+
+        for cam_name, bc_info in backchannel_info.items():
+            if not bc_info.get("has_backchannel"):
+                continue  # already marked as no backchannel
+            try:
+                cam_ip = await _resolve_camera_ip(cam_name)
+                if not cam_ip:
+                    continue
+                onvif_info = await _probe_onvif(cam_ip)
+                if not onvif_info:
+                    continue
+                model = onvif_info.get("model", "")
+                db_entry = match_camera_model(model) if model else None
+                if db_entry:
+                    bc_info["camera_model"] = model
+                    bc_info["manufacturer"] = db_entry.get("manufacturer", "")
+                    bc_info["speaker_type"] = db_entry.get("speaker_type", "unknown")
+                    bc_info["db_notes"] = db_entry.get("notes", "")
+                    # Override: if DB says no built-in speaker, mark accordingly
+                    if db_entry.get("speaker_type") != SPEAKER_BUILTIN:
+                        bc_info["has_backchannel"] = False
+                        bc_info["no_speaker_reason"] = db_entry.get("speaker_type", "unknown")
+            except Exception:
+                # ONVIF probe is best-effort during setup — don't block the wizard
+                continue
+    except ImportError:
+        pass  # camera_db or cameras router not available — skip
+
     return ProbeResult(
         frigate_reachable=frigate_reachable,
         frigate_version=frigate_version,
