@@ -273,6 +273,7 @@ def _apply_defaults(config: dict) -> dict:
     mqtt_pub.setdefault("topic_prefix", "voxwatch")
     mqtt_pub.setdefault("include_ai_analysis", True)
     mqtt_pub.setdefault("include_snapshot_url", True)
+    mqtt_pub.setdefault("announce_enabled", True)
 
     # Property address — substituted into radio dispatch message segments.
     # Users should override these values in config.yaml with their real address.

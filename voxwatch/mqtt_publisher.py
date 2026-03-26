@@ -15,6 +15,7 @@ Topic structure (all under a configurable prefix, default ``voxwatch/``)::
     voxwatch/events/ended      — detection ended (person left / completed)
     voxwatch/events/error      — something went wrong (TTS fail, AI timeout)
     voxwatch/status            — service status (online/offline via LWT)
+    voxwatch/announce          — SUBSCRIBE: play TTS on a camera speaker (HA integration)
 
 Usage::
 

@@ -405,6 +405,11 @@ class VoxWatchService:
         # thread and needs this attribute to subscribe.
         self._mqtt_topic = topic
 
+        # Announce topic — HA and external services can publish here to trigger
+        # TTS announcements on camera speakers.
+        announce_prefix = publish_cfg.get("topic_prefix", "voxwatch").rstrip("/")
+        self._mqtt_announce_topic = f"{announce_prefix}/announce"
+
         # Use a clean client ID so reconnects don't collide with a stale session.
         # paho-mqtt v2.0+ uses CallbackAPIVersion; v1.x uses clean_session.
         try:
@@ -498,6 +503,14 @@ class VoxWatchService:
                 self._mqtt_topic,
             )
             client.subscribe(self._mqtt_topic, qos=1)
+
+            # Subscribe to the announce topic for HA-triggered TTS announcements.
+            if hasattr(self, '_mqtt_announce_topic') and self._mqtt_announce_topic:
+                client.subscribe(self._mqtt_announce_topic, qos=1)
+                logger.info(
+                    "Subscribed to announce topic '%s'.",
+                    self._mqtt_announce_topic,
+                )
         else:
             logger.error("MQTT connect failed: %s", reason_code)
 
@@ -567,6 +580,16 @@ class VoxWatchService:
             # Shouldn't happen, but guard defensively.
             return
 
+        # Route announce messages to the announce handler instead of detection.
+        if (
+            hasattr(self, '_mqtt_announce_topic')
+            and msg.topic == self._mqtt_announce_topic
+        ):
+            self._loop.call_soon_threadsafe(
+                self._schedule_announce, event_data
+            )
+            return
+
         # Hand off to the asyncio event loop — this is the thread boundary.
         # asyncio.create_task cannot be called directly from another thread;
         # call_soon_threadsafe schedules a coroutine creation safely.
@@ -588,6 +611,110 @@ class VoxWatchService:
         self._active_tasks.add(task)
         # Auto-remove from the tracking set when the task completes.
         task.add_done_callback(self._active_tasks.discard)
+
+    # ── MQTT Announce handler ────────────────────────────────────────────────
+
+    def _schedule_announce(self, event_data: dict) -> None:
+        """Create an asyncio Task for ``_handle_announce`` from the event loop thread.
+
+        Called by ``call_soon_threadsafe`` when a message arrives on the
+        announce topic. Same thread-boundary pattern as ``_schedule_detection``.
+
+        Args:
+            event_data: Decoded JSON payload from the announce MQTT message.
+        """
+        task = asyncio.create_task(self._handle_announce(event_data))
+        self._active_tasks.add(task)
+        task.add_done_callback(self._active_tasks.discard)
+
+    async def _handle_announce(self, event_data: dict) -> None:
+        """Handle an MQTT announce request — synthesise TTS and push to camera.
+
+        Expected payload::
+
+            {
+                "camera": "front_door",
+                "message": "Package delivered at front door",
+                "voice": "af_heart",       // optional
+                "provider": "kokoro",      // optional
+                "speed": 1.0,              // optional
+                "tone": "none"             // optional: short, long, siren, none
+            }
+
+        Delegates to the preview API's announce handler if available, otherwise
+        runs the pipeline directly.
+
+        Args:
+            event_data: Decoded JSON dict from the MQTT announce message.
+        """
+        camera = str(event_data.get("camera", "")).strip()
+        message = str(event_data.get("message", "")).strip()
+
+        if not camera or not message:
+            logger.warning(
+                "MQTT announce: missing 'camera' or 'message' field, ignoring. "
+                "Payload keys: %s",
+                list(event_data.keys()),
+            )
+            return
+
+        if len(message) > 1000:
+            logger.warning(
+                "MQTT announce: message too long (%d chars, max 1000), truncating.",
+                len(message),
+            )
+            message = message[:1000]
+
+        logger.info(
+            "MQTT announce: camera=%s message_len=%d",
+            camera,
+            len(message),
+        )
+
+        # If the preview API is running, delegate to its announce handler
+        # which has the full TTS→convert→tone→push pipeline.
+        if self._preview_api is not None:
+            import aiohttp
+            try:
+                preview_port = self.config.get("preview_api_port", 8892)
+                url = f"http://127.0.0.1:{preview_port}/api/announce"
+                payload = {
+                    "camera": camera,
+                    "message": message,
+                }
+                # Pass through optional fields.
+                for key in ("voice", "provider", "speed", "tone"):
+                    if key in event_data:
+                        payload[key] = event_data[key]
+
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        url,
+                        json=payload,
+                        timeout=aiohttp.ClientTimeout(total=60),
+                    ) as resp:
+                        result = await resp.json()
+                        if resp.status == 200 and result.get("success"):
+                            logger.info(
+                                "MQTT announce: success camera=%s duration_ms=%s",
+                                camera,
+                                result.get("duration_ms"),
+                            )
+                        else:
+                            logger.error(
+                                "MQTT announce: failed camera=%s error=%s",
+                                camera,
+                                result.get("error", f"HTTP {resp.status}"),
+                            )
+            except Exception as exc:
+                logger.error(
+                    "MQTT announce: request to preview API failed: %s", exc
+                )
+        else:
+            logger.warning(
+                "MQTT announce: preview API not available, cannot process announce for camera=%s",
+                camera,
+            )
 
     # ── Pipeline orchestration ────────────────────────────────────────────────
 
