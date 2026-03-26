@@ -250,6 +250,9 @@ def _apply_defaults(config: dict) -> dict:
     # Detection fires the pipeline; Initial Response is immediate; Escalation
     # fires after `delay` seconds if the person is still present.
     pipeline = config.setdefault("pipeline", {})
+    if pipeline is None:
+        pipeline = {}
+        config["pipeline"] = pipeline
     initial_resp = pipeline.setdefault("initial_response", {})
     initial_resp.setdefault("delay", 0)
     initial_resp.setdefault("enabled", True)
@@ -260,6 +263,16 @@ def _apply_defaults(config: dict) -> dict:
     resolution = pipeline.setdefault("resolution", {})
     resolution.setdefault("enabled", False)
     resolution.setdefault("message", "Area clear.")
+
+    # MQTT event publishing — VoxWatch publishes events for Home Assistant.
+    mqtt_pub = config.setdefault("mqtt_publish", {})
+    if mqtt_pub is None:
+        mqtt_pub = {}
+        config["mqtt_publish"] = mqtt_pub
+    mqtt_pub.setdefault("enabled", True)
+    mqtt_pub.setdefault("topic_prefix", "voxwatch")
+    mqtt_pub.setdefault("include_ai_analysis", True)
+    mqtt_pub.setdefault("include_snapshot_url", True)
 
     # Property address — substituted into radio dispatch message segments.
     # Users should override these values in config.yaml with their real address.

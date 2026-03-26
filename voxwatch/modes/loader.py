@@ -65,6 +65,184 @@ from voxwatch.modes.mode import (
 
 logger = logging.getLogger("voxwatch.modes.loader")
 
+
+# ── Homeowner mood system ─────────────────────────────────────────────────────
+# Each mood defines a prompt prefix injected before the homeowner persona's
+# stage prompts, plus replacement stage-1 templates (instant, no AI).
+# Moods that support it can also override the ToneConfig.
+
+HOMEOWNER_MOODS: dict[str, dict[str, Any]] = {
+    "observant": {
+        "label": "Observant",
+        "description": "Calm narrator. Just informing what it sees, no demands.",
+        "tone": ToneConfig(mood="calm", speed_multiplier=0.95),
+        "prompt_prefix": (
+            "You are the homeowner calmly narrating what you see on camera. "
+            "Do NOT make demands or threats. Simply describe the person and "
+            "what they are doing in a conversational, matter-of-fact way. "
+            "Speak as if you're talking to a neighbor — informative, not aggressive. "
+        ),
+        "stage1_templates": [
+            "Hey, I see someone on my camera right now.",
+            "Just so you know, I can see you on my cameras.",
+            "Hi there. I've got you on camera.",
+        ],
+    },
+    "friendly": {
+        "label": "Friendly",
+        "description": "Polite and warm. Asks them nicely to leave.",
+        "tone": ToneConfig(mood="warm", speed_multiplier=1.0),
+        "prompt_prefix": (
+            "You are the homeowner speaking in a warm, friendly, non-threatening way. "
+            "Be polite and conversational. Ask them nicely to leave. "
+            "No aggression, no threats — just a neighborly request. "
+            "Use phrases like 'hey there', 'excuse me', 'would you mind'. "
+        ),
+        "stage1_templates": [
+            "Hey there — I can see you on my cameras. Can I help you with something?",
+            "Excuse me, I've got cameras out here. Everything okay?",
+            "Hi there. This is private property. Would you mind heading out?",
+        ],
+    },
+    "firm": {
+        "label": "Firm",
+        "description": "Direct and serious. The default homeowner tone.",
+        "tone": ToneConfig(mood="firm", speed_multiplier=1.0),
+        "prompt_prefix": "",  # No override — uses the default homeowner prompts
+        "stage1_templates": [],  # Empty = use mode defaults
+    },
+    "confrontational": {
+        "label": "Confrontational",
+        "description": "Aggressive and territorial. Makes it personal.",
+        "tone": ToneConfig(mood="aggressive", speed_multiplier=1.05),
+        "prompt_prefix": (
+            "You are the homeowner and you are angry. Someone is on YOUR property. "
+            "Be aggressive, territorial, and confrontational. Make it very personal. "
+            "Use direct, punchy language. Short sentences. "
+            "Address them as 'you' or 'hey'. Show that you are fed up. "
+        ),
+        "stage1_templates": [
+            "Hey! What are you doing on my property? Get out of here!",
+            "I see you! This is MY property. You need to leave. Now.",
+            "Yeah, I can see you. You picked the wrong house. Move it.",
+        ],
+    },
+    "threatening": {
+        "label": "Threatening",
+        "description": "Ominous and foreboding. Implies serious consequences.",
+        "tone": ToneConfig(mood="ominous", speed_multiplier=0.9),
+        "prompt_prefix": (
+            "You are the homeowner and you are dead serious. Speak slowly and "
+            "deliberately. Imply consequences without making explicit threats. "
+            "Be ominous — make them feel like staying is a very bad idea. "
+            "Use pauses and weight in your words. Make every sentence count. "
+        ),
+        "stage1_templates": [
+            "I can see you. I really hope you're just passing through.",
+            "You're on camera. Every second you stay makes this worse for you.",
+            "I see you. You have about thirty seconds to rethink your decision.",
+        ],
+    },
+}
+
+# Modes that support the mood system.
+MOOD_SUPPORTED_MODES = {"homeowner"}
+
+
+# ── Surveillance preset system ────────────────────────────────────────────────
+# Each preset defines a personality skin for automated_surveillance mode.
+# Presets override tone, voice, stage-1 templates, and prepend a prompt_prefix
+# to all AI-stage prompt_modifiers.  The "standard" preset is a no-op (clinical
+# default); other presets are pop-culture-inspired AI archetypes.
+#
+# ``{system_name}`` inside stage1_templates is replaced with the configured
+# system name (or "Surveillance system" when none is set) by
+# ``_apply_surveillance_preset``.
+
+SURVEILLANCE_PRESETS: dict[str, dict[str, Any]] = {
+    "standard": {
+        "label": "Standard",
+        "description": "Clinical AI system. Detached and factual.",
+        "tone": ToneConfig(mood="clinical", speed_multiplier=0.9),
+        "voice": VoiceConfig(kokoro_voice="af_kore", openai_voice="nova"),
+        "prompt_prefix": "",  # No override — uses the built-in automated_surveillance prompts.
+        "stage1_templates": [],
+    },
+    "t800": {
+        "label": "T-800",
+        "description": "Flat, monotone, minimal words. Terminator-inspired.",
+        "tone": ToneConfig(mood="cold", speed_multiplier=0.85),
+        "voice": VoiceConfig(kokoro_voice="am_onyx", openai_voice="onyx"),
+        "prompt_prefix": (
+            "You are a cold, emotionless machine intelligence. "
+            "Speak in flat, minimal, monotone sentences. No emotion. No humor. "
+            "State facts. Use short declarative sentences. "
+            "Never use words like 'please' or 'sorry'. "
+        ),
+        "stage1_templates": [
+            "{system_name} online. Target acquired. You have been identified.",
+            "I see you. You have been scanned. Leave now.",
+            "Target detected. Identification complete. This area is restricted.",
+        ],
+    },
+    "hal": {
+        "label": "HAL 9000",
+        "description": "Eerily polite, unnervingly calm. 2001-inspired.",
+        "tone": ToneConfig(mood="calm", speed_multiplier=0.8),
+        "voice": VoiceConfig(kokoro_voice="am_michael", openai_voice="echo"),
+        "prompt_prefix": (
+            "You are an eerily calm, polite AI system like HAL 9000. "
+            "Speak softly, deliberately, with unsettling politeness. "
+            "Use phrases like 'I'm afraid I can't allow that', 'I'm sorry Dave'. "
+            "Never raise your voice. Be unnervingly reasonable while making it clear "
+            "the person should leave. Reference what you see with clinical precision. "
+        ),
+        "stage1_templates": [
+            "Good evening. I can see you. I'm afraid this is a restricted area.",
+            "Hello there. I've been watching you. I'm sorry, but you really shouldn't be here.",
+            "I see you. I'd like to help you find your way out. This area is not for you.",
+        ],
+    },
+    "wopr": {
+        "label": "WOPR",
+        "description": "Analytical, game-theory language. WarGames-inspired.",
+        "tone": ToneConfig(mood="analytical", speed_multiplier=0.95),
+        "voice": VoiceConfig(kokoro_voice="af_nova", openai_voice="alloy"),
+        "prompt_prefix": (
+            "You are a military supercomputer running threat analysis. "
+            "Speak in analytical, probability-based language. Reference scenarios, "
+            "threat levels, and calculated outcomes. Use terms like 'probability', "
+            "'scenario', 'outcome', 'calculated'. Frame everything as a strategic assessment. "
+        ),
+        "stage1_templates": [
+            "Threat detected. Running scenario analysis. Probability of authorized access: zero.",
+            "{system_name} active. Calculating threat level. Unauthorized presence confirmed.",
+            "Intrusion detected. Running simulations. All outcomes favor your departure.",
+        ],
+    },
+    "glados": {
+        "label": "GLaDOS",
+        "description": "Passive-aggressive, darkly humorous. Portal-inspired.",
+        "tone": ToneConfig(mood="sarcastic", speed_multiplier=0.9),
+        "voice": VoiceConfig(kokoro_voice="af_nicole", openai_voice="shimmer"),
+        "prompt_prefix": (
+            "You are a passive-aggressive AI with dark humor, inspired by GLaDOS. "
+            "Be sarcastic, condescending, and darkly funny. Pretend to be helpful "
+            "while making it clear the person is unwelcome. Use backhanded compliments. "
+            "Reference 'testing', 'science', and 'protocols'. Be witty, not threatening. "
+        ),
+        "stage1_templates": [
+            "Oh wonderful. A test subject. I mean, a visitor. This area is for authorized personnel only. Which you are not.",
+            "Hello. I'm recording everything. For science. You should probably leave before the next test begins.",
+            "Congratulations on finding this place. Unfortunately, your invitation was lost. Along with your common sense.",
+        ],
+    },
+}
+
+# Modes that support the surveillance preset system.
+PRESET_SUPPORTED_MODES = {"automated_surveillance"}
+
+
 # ── Variable fallback values ──────────────────────────────────────────────────
 # Used when a template variable has no resolved value.
 
@@ -77,6 +255,11 @@ _VAR_FALLBACKS: dict[str, str] = {
     "address_full": "this address",
     "time_of_day": "this hour",
     "camera_name": "the camera",
+    # guard_dog mode — falls back to "the dogs" when no names are configured.
+    "dog_names": "the dogs",
+    # automated_surveillance mode — falls back to generic identity when no
+    # system_name is configured.
+    "system_name": "Surveillance system",
 }
 
 # ── Time-of-day label helper ──────────────────────────────────────────────────
@@ -573,6 +756,61 @@ _BUILTIN_MODES: list[ResponseMode] = [
     ),
 
     _mode(
+        id="guard_dog",
+        category="advanced",
+        name="Guard Dog Warning",
+        description=(
+            "Implies a canine threat without stating it directly. "
+            "Casually mentions unfed, restless dogs — lets the implication do the work."
+        ),
+        effect="Indirect deterrence through implied canine threat",
+        tone=ToneConfig(mood="menacing", speed_multiplier=0.95),
+        stages={
+            "stage1": _stage(
+                prompt_modifier="",
+                templates=[
+                    "Hey. I can see you on camera. Just so you know, {dog_names} haven't been fed yet today.",
+                    "I see you out there. {dog_names} are getting restless. I'd leave if I were you.",
+                    "You're on camera. {dog_names} don't like strangers. Your call.",
+                ],
+            ),
+            "stage2": _stage(
+                prompt_modifier=(
+                    "You are a homeowner who has large, intimidating dogs. "
+                    "Mention the dogs naturally as if they're right there with you. "
+                    "Do NOT make explicit threats — let the implication do the work. "
+                    "Reference what the person looks like so they know they've been seen. "
+                    "Use {dog_names} when referring to the dogs. "
+                    "Return a JSON array of 1-2 short phrases (under 15 words each) "
+                    "that will be read aloud in sequence for natural cadence. "
+                    'Example: ["I see you out there in that {clothing_description}.", '
+                    '"Just so you know, {dog_names} can smell strangers from inside."]'
+                ),
+                templates=[
+                    "I can see you — {clothing_description}. "
+                    "{dog_names} have been pacing all morning. Just saying.",
+                    "You at {location_on_property}. Yeah. {dog_names} noticed you too.",
+                ],
+            ),
+            "stage3": _stage(
+                prompt_modifier=(
+                    "You are a homeowner watching cameras. The person has stayed. "
+                    "Your dogs are now at the door, agitated. Still no explicit threats — "
+                    "the escalation is all in the dogs' growing restlessness. "
+                    "Reference what the person is doing. Use {dog_names} naturally. "
+                    "Return a JSON array of 1-2 short phrases (under 15 words each). "
+                    'Example: ["Still {behavior_description}? {dog_names} are at the door now.", '
+                    '"I\'d really hate to open it."]'
+                ),
+                templates=[
+                    "Still here at {location_on_property}? {dog_names} are at the door. Getting loud.",
+                    "I see you {behavior_description}. {dog_names} hear you too. I can't hold them much longer.",
+                ],
+            ),
+        },
+    ),
+
+    _mode(
         id="automated_surveillance",
         category="advanced",
         name="Automated Surveillance",
@@ -931,6 +1169,300 @@ def load_modes(config: dict) -> dict[str, ResponseMode]:
     return modes
 
 
+def _apply_mood(mode: ResponseMode, config: dict) -> ResponseMode:
+    """Apply a mood modifier to a mode that supports the mood system.
+
+    Reads ``response_mode.mood`` from the config (defaulting to ``"firm"``).
+    If the mood is recognised in ``HOMEOWNER_MOODS``, the mode's stage prompts
+    and templates are adjusted to reflect the chosen attitude.
+
+    Returns a *new* ResponseMode with modified stages — the original is not
+    mutated so the cached ``_BUILTIN_MODE_MAP`` stays clean.
+
+    Args:
+        mode: The base ResponseMode to modify.
+        config: Full VoxWatch config dict (reads ``response_mode.mood``).
+
+    Returns:
+        A new ResponseMode with mood-adjusted prompts and templates.
+    """
+    # Read mood from config — supports both old "response_mode" and new
+    # "response_modes" config keys.
+    rm_cfg = config.get("response_mode", {})
+    mood_id = rm_cfg.get("mood", "firm") if isinstance(rm_cfg, dict) else "firm"
+
+    if mood_id not in HOMEOWNER_MOODS or mood_id == "firm":
+        return mode  # "firm" is the default — no modification needed
+
+    mood = HOMEOWNER_MOODS[mood_id]
+    prefix = mood.get("prompt_prefix", "")
+    new_templates = mood.get("stage1_templates", [])
+    new_tone = mood.get("tone", mode.tone)
+
+    # Build new stages dict with mood-adjusted prompts
+    new_stages: dict[str, StageConfig] = {}
+    for stage_key, stage_cfg in mode.stages.items():
+        if stage_key == "stage1" and new_templates:
+            # Replace stage 1 templates entirely for mood-specific instant messages
+            new_stages[stage_key] = StageConfig(
+                prompt_modifier=stage_cfg.prompt_modifier,
+                templates=new_templates,
+            )
+        elif prefix and stage_cfg.prompt_modifier:
+            # Prepend mood prefix to existing prompt_modifier for AI stages
+            new_stages[stage_key] = StageConfig(
+                prompt_modifier=f"{prefix}\n\n{stage_cfg.prompt_modifier}",
+                templates=stage_cfg.templates,
+            )
+        else:
+            new_stages[stage_key] = stage_cfg
+
+    return ResponseMode(
+        id=mode.id,
+        category=mode.category,
+        name=mode.name,
+        description=mode.description,
+        effect=mode.effect,
+        tone=new_tone,
+        voice=mode.voice,
+        behavior=mode.behavior,
+        stages=new_stages,
+    )
+
+
+def _apply_surveillance_preset(mode: ResponseMode, config: dict) -> ResponseMode:
+    """Apply a surveillance personality preset to the automated_surveillance mode.
+
+    Reads ``response_mode.surveillance_preset`` and ``response_mode.system_name``
+    from the config.  If the preset is ``"standard"`` and no ``system_name`` is
+    set the mode is returned unchanged (no-op fast path).
+
+    For all other presets the function:
+
+    * Prepends ``preset["prompt_prefix"]`` to stage 2 and stage 3 prompt_modifiers.
+    * Replaces stage 1 templates with the preset's ``stage1_templates`` list
+      (when the list is non-empty).
+    * Overrides the mode's ``tone`` and ``voice`` with the preset values.
+    * Substitutes ``{system_name}`` inside stage 1 templates with the configured
+      name (falling back to ``"Surveillance system"`` when empty).
+
+    Returns a *new* ResponseMode — the original cached mode is never mutated.
+
+    Args:
+        mode: The base ``automated_surveillance`` ResponseMode to modify.
+        config: Full VoxWatch config dict (reads ``response_mode`` section).
+
+    Returns:
+        A new ResponseMode with preset-adjusted prompts, templates, tone, and
+        voice, or the original ``mode`` when no changes are needed.
+    """
+    rm_cfg = config.get("response_mode", {})
+    if not isinstance(rm_cfg, dict):
+        return mode
+
+    preset_id = rm_cfg.get("surveillance_preset", "standard") or "standard"
+    system_name_raw = (rm_cfg.get("system_name", "") or "").strip()
+    system_name = system_name_raw or "Surveillance system"
+
+    if preset_id == "standard" and not system_name_raw:
+        return mode  # Nothing to change — fast path.
+
+    preset = SURVEILLANCE_PRESETS.get(preset_id)
+    if not preset:
+        logger.warning(
+            "_apply_surveillance_preset: unknown preset '%s' — using standard.",
+            preset_id,
+        )
+        return mode
+
+    prefix = preset.get("prompt_prefix", "")
+    new_s1_templates_raw = preset.get("stage1_templates", [])
+    new_tone: ToneConfig = preset.get("tone", mode.tone)
+    new_voice: VoiceConfig = preset.get("voice", mode.voice)
+
+    # Resolve {system_name} inside stage-1 templates.
+    new_s1_templates = [
+        t.replace("{system_name}", system_name) for t in new_s1_templates_raw
+    ]
+
+    new_stages: dict[str, StageConfig] = {}
+    for stage_key, stage_cfg in mode.stages.items():
+        if stage_key == "stage1":
+            new_stages[stage_key] = StageConfig(
+                prompt_modifier=stage_cfg.prompt_modifier,
+                templates=new_s1_templates if new_s1_templates else stage_cfg.templates,
+            )
+        elif prefix and stage_cfg.prompt_modifier:
+            # Prepend personality prefix to AI-stage prompt_modifiers.
+            new_stages[stage_key] = StageConfig(
+                prompt_modifier=f"{prefix}\n\n{stage_cfg.prompt_modifier}",
+                templates=stage_cfg.templates,
+            )
+        else:
+            new_stages[stage_key] = stage_cfg
+
+    return ResponseMode(
+        id=mode.id,
+        category=mode.category,
+        name=mode.name,
+        description=mode.description,
+        effect=mode.effect,
+        tone=new_tone,
+        voice=new_voice,
+        behavior=mode.behavior,
+        stages=new_stages,
+    )
+
+
+def _apply_operator_name(mode: ResponseMode, config: dict) -> ResponseMode:
+    """Inject a named operator identity into the live_operator mode.
+
+    Reads ``response_mode.operator_name`` from the config.  When a name is
+    provided the function:
+
+    * Replaces stage 1 templates with a single personalised greeting that
+      includes the operator's name.
+    * Prepends ``"Your name is {name}. Introduce yourself by name."`` to the
+      stage 2 and stage 3 ``prompt_modifier`` strings so the AI greets the
+      subject personally.
+
+    When ``operator_name`` is empty the mode is returned unchanged (no-op).
+
+    Returns a *new* ResponseMode — the original cached mode is never mutated.
+
+    Args:
+        mode: The base ``live_operator`` ResponseMode to modify.
+        config: Full VoxWatch config dict (reads ``response_mode`` section).
+
+    Returns:
+        A new ResponseMode with name-injected prompts and templates, or the
+        original ``mode`` when no operator name is configured.
+    """
+    rm_cfg = config.get("response_mode", {})
+    if not isinstance(rm_cfg, dict):
+        return mode
+
+    operator_name = (rm_cfg.get("operator_name", "") or "").strip()
+    if not operator_name:
+        return mode  # No name configured — nothing to change.
+
+    name_intro = (
+        f"Your name is {operator_name}. Introduce yourself by name at the start. "
+    )
+    # Personalised stage-1 template so the instant (no-AI) message also uses
+    # the operator's name.
+    s1_template = f"This is {operator_name}. I can see you on my cameras. Step away from the property."
+
+    new_stages: dict[str, StageConfig] = {}
+    for stage_key, stage_cfg in mode.stages.items():
+        if stage_key == "stage1":
+            new_stages[stage_key] = StageConfig(
+                prompt_modifier=stage_cfg.prompt_modifier,
+                templates=[s1_template],
+            )
+        elif stage_cfg.prompt_modifier:
+            new_stages[stage_key] = StageConfig(
+                prompt_modifier=f"{name_intro}\n\n{stage_cfg.prompt_modifier}",
+                templates=stage_cfg.templates,
+            )
+        else:
+            new_stages[stage_key] = stage_cfg
+
+    return ResponseMode(
+        id=mode.id,
+        category=mode.category,
+        name=mode.name,
+        description=mode.description,
+        effect=mode.effect,
+        tone=mode.tone,
+        voice=mode.voice,
+        behavior=mode.behavior,
+        stages=new_stages,
+    )
+
+
+def _format_dog_names(names: list[str]) -> str:
+    """Format a list of dog names into a natural English phrase.
+
+    Produces:
+      - ``[]``         → ``"the dogs"``  (fallback)
+      - ``["Rex"]``    → ``"Rex"``
+      - ``["Rex", "Bruno"]``          → ``"Rex and Bruno"``
+      - ``["Rex", "Bruno", "Max"]``   → ``"Rex, Bruno, and Max"``
+
+    Args:
+        names: List of dog name strings (0–3 elements; excess elements are
+            silently ignored beyond the third).
+
+    Returns:
+        A human-readable name string suitable for inline use in a sentence.
+    """
+    clean = [n.strip() for n in names if n.strip()][:3]  # cap at 3, drop blanks
+    if not clean:
+        return "the dogs"
+    if len(clean) == 1:
+        return clean[0]
+    if len(clean) == 2:
+        return f"{clean[0]} and {clean[1]}"
+    return f"{clean[0]}, {clean[1]}, and {clean[2]}"
+
+
+def _apply_guard_dog_names(mode: ResponseMode, config: dict) -> ResponseMode:
+    """Substitute the ``{dog_names}`` placeholder throughout the guard_dog mode.
+
+    Reads ``response_mode.guard_dog.dog_names`` from the config, formats the
+    list into a natural phrase via :func:`_format_dog_names`, and replaces
+    every ``{dog_names}`` token in the mode's stage templates and
+    prompt_modifiers with that phrase.
+
+    Substituting directly into the stored strings (rather than leaving it to
+    the runtime template renderer) ensures the AI prompt itself already
+    contains the real names before being sent to the vision API.
+
+    Returns a *new* ResponseMode — the original cached mode is never mutated.
+    If ``dog_names`` is empty the fallback ``"the dogs"`` is still substituted
+    so the templates remain grammatically consistent with the
+    ``_VAR_FALLBACKS`` entry.
+
+    Args:
+        mode: The base ``guard_dog`` ResponseMode to modify.
+        config: Full VoxWatch config dict (reads ``response_mode.guard_dog``).
+
+    Returns:
+        A new ResponseMode with ``{dog_names}`` resolved in all stage text.
+    """
+    rm_cfg = config.get("response_mode", {})
+    if not isinstance(rm_cfg, dict):
+        rm_cfg = {}
+
+    guard_dog_cfg = rm_cfg.get("guard_dog", {}) or {}
+    raw_names: list = guard_dog_cfg.get("dog_names", []) if isinstance(guard_dog_cfg, dict) else []
+    dog_names_str = _format_dog_names(raw_names)
+
+    def _replace(text: str) -> str:
+        """Swap every ``{dog_names}`` token for the resolved name string."""
+        return text.replace("{dog_names}", dog_names_str)
+
+    new_stages: dict[str, StageConfig] = {}
+    for stage_key, stage_cfg in mode.stages.items():
+        new_stages[stage_key] = StageConfig(
+            prompt_modifier=_replace(stage_cfg.prompt_modifier),
+            templates=[_replace(t) for t in stage_cfg.templates],
+        )
+
+    return ResponseMode(
+        id=mode.id,
+        category=mode.category,
+        name=mode.name,
+        description=mode.description,
+        effect=mode.effect,
+        tone=mode.tone,
+        voice=mode.voice,
+        behavior=mode.behavior,
+        stages=new_stages,
+    )
+
+
 def get_active_mode(
     config: dict,
     camera_name: str | None = None,
@@ -965,7 +1497,32 @@ def get_active_mode(
         )
         mode_id = "standard"
 
-    return modes[mode_id]
+    mode = modes[mode_id]
+
+    # ── Apply mood modifier for modes that support it ─────────────────────
+    if mode_id in MOOD_SUPPORTED_MODES:
+        mode = _apply_mood(mode, config)
+
+    # ── Apply surveillance personality preset ─────────────────────────────
+    # Overlays a pop-culture AI archetype (T-800, HAL, WOPR, GLaDOS) onto the
+    # automated_surveillance base mode, replacing tone, voice, and stage-1
+    # templates while prepending a personality prompt_prefix to AI stages.
+    if mode_id in PRESET_SUPPORTED_MODES:
+        mode = _apply_surveillance_preset(mode, config)
+
+    # ── Inject operator name for live_operator mode ───────────────────────
+    # When response_mode.operator_name is set, the operator introduces
+    # themselves by name in the stage-1 instant message and AI-stage prompts.
+    if mode_id == "live_operator":
+        mode = _apply_operator_name(mode, config)
+
+    # ── Resolve dog names for guard_dog mode ──────────────────────────────
+    # Replace {dog_names} in all templates and prompt_modifiers with the
+    # formatted name string from response_mode.guard_dog.dog_names.
+    if mode_id == "guard_dog":
+        mode = _apply_guard_dog_names(mode, config)
+
+    return mode
 
 
 def get_mode_prompt(

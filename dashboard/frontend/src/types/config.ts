@@ -446,12 +446,30 @@ export interface ResponseModeConfig {
    */
   custom_prompt?: string | undefined;
   /**
+   * Mood/attitude modifier for persona modes that support it (e.g. homeowner).
+   * Changes the tone and intensity of the AI-generated messages without
+   * changing the persona itself. One of: "observant", "friendly", "firm",
+   * "confrontational", "threatening". Defaults to "firm" if not set.
+   */
+  mood?: string;
+  /**
    * Dispatch-specific customization fields.
    * Only consumed by dispatch-mode response modes (e.g. police_dispatch).
    * Safe to include in the config regardless of active mode — non-dispatch
    * modes ignore it entirely.
    */
   dispatch?: DispatchConfig;
+  /** Surveillance preset for automated_surveillance mode. */
+  surveillance_preset?: string;
+  /** Custom system name for automated_surveillance mode. */
+  system_name?: string;
+  /** Operator name for live_operator mode. */
+  operator_name?: string;
+  /** Guard dog customization settings. */
+  guard_dog?: {
+    /** Dog names (0-3). Empty array = generic "the dogs". */
+    dog_names?: string[];
+  };
 }
 
 /**
@@ -592,6 +610,18 @@ export interface ResponseModesConfig {
   modes?: ResponseModeDefinition[];
 }
 
+/** MQTT event publishing configuration for Home Assistant integration. */
+export interface MqttPublishConfig {
+  /** Whether VoxWatch publishes events to MQTT. Default true. */
+  enabled?: boolean;
+  /** MQTT topic prefix for all VoxWatch events. Default "voxwatch". */
+  topic_prefix?: string;
+  /** Include AI analysis details in stage events. Default true. */
+  include_ai_analysis?: boolean;
+  /** Include Frigate snapshot URL in detection events. Default true. */
+  include_snapshot_url?: boolean;
+}
+
 /** Logging configuration. */
 export interface LoggingConfig {
   /** Log level: "DEBUG" | "INFO" | "WARNING" | "ERROR". */
@@ -632,6 +662,8 @@ export interface VoxWatchConfig {
    */
   persona?: PersonaConfig;
   logging: LoggingConfig;
+  /** MQTT event publishing configuration for Home Assistant automations. */
+  mqtt_publish?: MqttPublishConfig;
 }
 
 /** Validation result returned by the backend or client-side validator. */

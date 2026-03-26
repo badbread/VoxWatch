@@ -16,7 +16,7 @@
  *    "Remove from VoxWatch" button with confirmation guard.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ArrowLeft,
   Volume2,
@@ -130,6 +130,17 @@ export function CameraDetail({ camera, onBack }: CameraDetailProps) {
       setExternalSpeakerAck(false);
     },
   });
+
+  // Auto-identify camera when user selects a different camera.
+  // Clears stale identification data immediately, then fires an ONVIF probe
+  // so the user sees correct model/speaker info without clicking "Identify".
+  useEffect(() => {
+    setIdentifyResult(null);
+    setOverrideBackchannel(false);
+    setExternalSpeakerAck(false);
+    identifyMutation.mutate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [camera.name]);
 
   // Mutation: add this camera to VoxWatch config (for unconfigured cameras)
   const addCameraMutation = useMutation({

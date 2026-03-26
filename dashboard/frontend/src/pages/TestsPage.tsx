@@ -38,7 +38,8 @@ import { TestAudioButton } from '@/components/audio/TestAudioButton';
 import { ErrorBoundary } from '@/components/common/ErrorBoundary';
 import { CameraReportPrompt } from '@/components/common/CameraReportPrompt';
 import { useServiceStatus } from '@/hooks/useServiceStatus';
-import { getConfig } from '@/api/config';
+import { getConfig, saveConfig } from '@/api/config';
+import { LoggingConfigForm } from '@/components/config/LoggingConfigForm';
 import { testAudio } from '@/api/audio';
 import { previewAudio } from '@/api/status';
 import { getLogs } from '@/api/system';
@@ -1063,15 +1064,32 @@ export function TestsPage() {
           <MqttSimulationSection cameras={cameras} />
         </SectionCard>
 
-        {/* ── Section 5: Service Logs ────────────────────────────────────── */}
+        {/* ── Section 5: Logging & Service Logs ─────────────────────────── */}
         <SectionCard
           icon={FileText}
-          title="Service Logs"
-          description="Tail the VoxWatch service log for ERROR, WARNING, and DEBUG output."
+          title="Logging & Service Logs"
+          description="Configure log level and tail the VoxWatch service log."
           open={open.logs}
           onToggle={() => toggle('logs')}
         >
-          <ServiceLogsSection />
+          <div className="space-y-4">
+            {config?.logging && (
+              <div className="rounded-xl border border-gray-200 bg-gray-50 dark:border-gray-700/40 dark:bg-gray-800/40 px-4 py-3">
+                <LoggingConfigForm
+                  value={config.logging}
+                  onChange={async (logging) => {
+                    try {
+                      await saveConfig({ ...config, logging });
+                    } catch {
+                      // saveConfig handles errors internally
+                    }
+                  }}
+                  errors={[]}
+                />
+              </div>
+            )}
+            <ServiceLogsSection />
+          </div>
         </SectionCard>
       </div>
     </ErrorBoundary>

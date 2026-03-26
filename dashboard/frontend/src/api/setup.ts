@@ -198,8 +198,48 @@ export async function probeServices(req: ProbeRequest): Promise<ProbeResult> {
  * @param req - Complete setup configuration collected across all wizard steps
  * @returns GenerateConfigResult indicating success and the written config path
  */
+// ---------------------------------------------------------------------------
+// Service connectivity tests (used by config editor)
+// ---------------------------------------------------------------------------
+
+/** Result from a single-service test endpoint. */
+export interface TestServiceResult {
+  ok: boolean;
+  message: string;
+  version?: string;
+  latency_ms?: number;
+}
+
+/** Test Frigate NVR connectivity at the given host and port. */
+export async function testFrigate(host: string, port: number): Promise<TestServiceResult> {
+  const response = await apiClient.post<TestServiceResult>('/setup/test-frigate', { host, port }, { timeout: 10_000 });
+  return response.data;
+}
+
+/** Test go2rtc connectivity at the given host and port. */
+export async function testGo2rtc(host: string, port: number): Promise<TestServiceResult> {
+  const response = await apiClient.post<TestServiceResult>('/setup/test-go2rtc', { host, port }, { timeout: 10_000 });
+  return response.data;
+}
+
+/** Test MQTT broker connectivity and authentication. */
+export async function testMqtt(
+  host: string,
+  port: number,
+  username?: string,
+  password?: string,
+): Promise<TestServiceResult> {
+  const response = await apiClient.post<TestServiceResult>('/setup/test-mqtt', {
+    host,
+    port,
+    username: username ?? '',
+    password: password ?? '',
+  }, { timeout: 10_000 });
+  return response.data;
+}
+
 export async function generateConfig(req: GenerateConfigRequest): Promise<GenerateConfigResult> {
-  const response = await apiClient.post<GenerateConfigResult>('/setup/generate', req, {
+  const response = await apiClient.post<GenerateConfigResult>('/setup/generate-config', req, {
     // Config generation can take a moment if TTS caches need to be built
     timeout: 30_000,
   });

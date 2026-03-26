@@ -63,6 +63,17 @@ KNOWN_CAMERAS: dict[str, dict] = {
         "tested": True,
         "notes": "Working. Built-in speaker. Same backchannel profile as CX410.",
     },
+    "E1 Zoom": {
+        "manufacturer": "Reolink",
+        "has_speaker": True,
+        "speaker_type": SPEAKER_BUILTIN,
+        "backchannel_codec": "PCMU/8000",
+        "tested": True,
+        "notes": (
+            "Working. Indoor PTZ camera with built-in speaker. "
+            "RTSP backchannel confirmed via go2rtc."
+        ),
+    },
     # ── Dahua — built-in speaker ─────────────────────────────────────────────
     "IPC-Color4K-T180": {
         "manufacturer": "Dahua",
