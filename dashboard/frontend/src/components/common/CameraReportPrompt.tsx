@@ -27,9 +27,10 @@
  */
 
 import { useState } from 'react';
-import { ExternalLink, Heart, AlertTriangle, X, Mail } from 'lucide-react';
+import { ExternalLink, Heart, AlertTriangle, X, Mail, Copy, Check } from 'lucide-react';
 import { cn } from '@/utils/cn';
-import { buildCameraReportUrl, buildCameraReportEmailUrl } from '@/utils/cameraReport';
+import { buildCameraReportUrl, buildCameraReportEmail } from '@/utils/cameraReport';
+import type { CameraReportEmail } from '@/utils/cameraReport';
 
 /** VoxWatch dashboard version — hardcoded here, matches pyproject.toml. */
 const VOXWATCH_VERSION = '1.0.0';
@@ -130,6 +131,8 @@ export function CameraReportPrompt({
   onDismiss,
 }: CameraReportPromptProps) {
   const [dismissed, setDismissed] = useState(false);
+  const [emailPopup, setEmailPopup] = useState(false);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
 
   if (dismissed) return null;
 
@@ -151,7 +154,7 @@ export function CameraReportPrompt({
   };
 
   const reportUrl = buildCameraReportUrl(reportParams);
-  const emailUrl = buildCameraReportEmailUrl(reportParams);
+  const emailData = buildCameraReportEmail(reportParams);
 
   /** Handle dismiss — call optional parent callback and hide the prompt. */
   const handleDismiss = () => {
@@ -228,11 +231,10 @@ export function CameraReportPrompt({
               Report on GitHub
             </a>
 
-            {/* Secondary CTA — opens mailto: link in a new window */}
-            <a
-              href={emailUrl}
-              target="_blank"
-              rel="noopener noreferrer"
+            {/* Secondary CTA — opens copyable email popup */}
+            <button
+              type="button"
+              onClick={() => setEmailPopup(true)}
               className={cn(
                 'inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold',
                 'bg-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1',
@@ -241,7 +243,7 @@ export function CameraReportPrompt({
             >
               <Mail className="h-3.5 w-3.5" aria-hidden="true" />
               Email Report
-            </a>
+            </button>
 
             {/* Tertiary — dismiss link, visually subdued */}
             <button
@@ -256,6 +258,175 @@ export function CameraReportPrompt({
               Maybe Later
             </button>
           </div>
+        </div>
+      </div>
+      {/* Email report popup */}
+      {emailPopup && (
+        <EmailReportPopup
+          email={emailData}
+          onClose={() => setEmailPopup(false)}
+          copiedField={copiedField}
+          onCopy={(field, text) => {
+            navigator.clipboard.writeText(text);
+            setCopiedField(field);
+            setTimeout(() => setCopiedField(null), 2000);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  EmailReportPopup — modal overlay with copyable email fields       */
+/* ------------------------------------------------------------------ */
+
+interface EmailReportPopupProps {
+  email: CameraReportEmail;
+  onClose: () => void;
+  copiedField: string | null;
+  onCopy: (field: string, text: string) => void;
+}
+
+function CopyButton({
+  field,
+  text,
+  copiedField,
+  onCopy,
+}: {
+  field: string;
+  text: string;
+  copiedField: string | null;
+  onCopy: (field: string, text: string) => void;
+}) {
+  const copied = copiedField === field;
+  return (
+    <button
+      type="button"
+      onClick={() => onCopy(field, text)}
+      className={cn(
+        'inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium transition-colors',
+        copied
+          ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400'
+          : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600',
+      )}
+      aria-label={copied ? 'Copied' : `Copy ${field}`}
+    >
+      {copied ? (
+        <Check className="h-3 w-3" aria-hidden="true" />
+      ) : (
+        <Copy className="h-3 w-3" aria-hidden="true" />
+      )}
+      {copied ? 'Copied' : 'Copy'}
+    </button>
+  );
+}
+
+function EmailReportPopup({ email, onClose, copiedField, onCopy }: EmailReportPopupProps) {
+  const handleCopyAll = () => {
+    const full = `To: ${email.to}\nSubject: ${email.subject}\n\n${email.body}`;
+    onCopy('all', full);
+  };
+
+  return (
+    // Backdrop
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Email camera report"
+    >
+      <div className="relative w-full max-w-lg rounded-xl border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-800">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-gray-200 px-5 py-3 dark:border-gray-700">
+          <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">
+            Email Camera Report
+          </h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+            aria-label="Close"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="space-y-4 px-5 py-4">
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            Copy the fields below and paste them into your email client.
+          </p>
+
+          {/* To */}
+          <div>
+            <div className="mb-1 flex items-center justify-between">
+              <label className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                To
+              </label>
+              <CopyButton field="to" text={email.to} copiedField={copiedField} onCopy={onCopy} />
+            </div>
+            <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 font-mono text-sm text-gray-800 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200">
+              {email.to}
+            </div>
+          </div>
+
+          {/* Subject */}
+          <div>
+            <div className="mb-1 flex items-center justify-between">
+              <label className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                Subject
+              </label>
+              <CopyButton field="subject" text={email.subject} copiedField={copiedField} onCopy={onCopy} />
+            </div>
+            <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 font-mono text-sm text-gray-800 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200">
+              {email.subject}
+            </div>
+          </div>
+
+          {/* Body */}
+          <div>
+            <div className="mb-1 flex items-center justify-between">
+              <label className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                Body
+              </label>
+              <CopyButton field="body" text={email.body} copiedField={copiedField} onCopy={onCopy} />
+            </div>
+            <pre className="max-h-48 overflow-y-auto whitespace-pre-wrap rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 font-mono text-sm text-gray-800 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200">
+              {email.body}
+            </pre>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-end gap-2 border-t border-gray-200 px-5 py-3 dark:border-gray-700">
+          <button
+            type="button"
+            onClick={handleCopyAll}
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold transition-colors',
+              copiedField === 'all'
+                ? 'bg-green-600 text-white'
+                : 'bg-blue-600 text-white hover:bg-blue-700',
+            )}
+          >
+            {copiedField === 'all' ? (
+              <Check className="h-4 w-4" aria-hidden="true" />
+            ) : (
+              <Copy className="h-4 w-4" aria-hidden="true" />
+            )}
+            {copiedField === 'all' ? 'Copied!' : 'Copy All'}
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700"
+          >
+            Close
+          </button>
         </div>
       </div>
     </div>

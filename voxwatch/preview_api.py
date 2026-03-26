@@ -101,6 +101,7 @@ class PreviewAPI:
         self._app = web.Application()
         self._app.router.add_post("/api/preview", self._handle_preview)
         self._app.router.add_post("/api/preview/generate-intro", self._handle_generate_intro)
+        self._app.router.add_post("/api/announce", self._handle_announce)
         self._app.router.add_get("/api/health", self._handle_health)
 
         self._runner: web.AppRunner | None = None
@@ -467,6 +468,226 @@ class PreviewAPI:
                 "X-Intro-Saved": "true" if save else "false",
             },
         )
+
+    # ── Announce endpoint ──────────────────────────────────────────────────────
+
+    async def _handle_announce(self, request: web.Request) -> web.Response:
+        """POST /api/announce — Synthesise TTS and push audio to a camera speaker.
+
+        Designed for Home Assistant automations and external integrations.
+        Unlike the test endpoint, this does real TTS synthesis with the full
+        pipeline (generate → convert → optional tone → push via go2rtc).
+
+        Request body (JSON):
+
+        .. code-block:: json
+
+            {
+                "camera": "front_door",
+                "message": "Package delivered at front door",
+                "voice": "af_heart",
+                "provider": "kokoro",
+                "speed": 1.0,
+                "tone": "none",
+                "cache_key": "pkg_delivered"
+            }
+
+        ``camera`` — Target camera name (required). Must match a go2rtc stream.
+
+        ``message`` — Text to synthesise and play (required, max 1000 chars).
+
+        ``voice`` — TTS voice override. Uses configured default when omitted.
+
+        ``provider`` — TTS provider override. Uses configured default when omitted.
+
+        ``speed`` — Speed multiplier (0.25–4.0, default 1.0).
+
+        ``tone`` — Attention tone to prepend: ``"short"``, ``"long"``,
+            ``"siren"``, or ``"none"`` (default ``"none"``).
+
+        ``cache_key`` — Optional. When provided, the generated audio is cached
+            under this key and reused on subsequent requests with the same key,
+            skipping TTS generation entirely. Useful for HA automations that
+            play the same message repeatedly (e.g. "goodnight", "doorbell").
+            Clear cache by sending a request with ``"cache_clear": true``.
+
+        Returns:
+            JSON ``{"success": true, "camera": "...", "duration_ms": 1234}``
+            on success, or a JSON error response on failure.
+
+        Args:
+            request: Incoming aiohttp POST request with JSON body.
+        """
+        try:
+            body: dict = await request.json()
+        except Exception:
+            return web.json_response(
+                {"error": "Request body must be valid JSON."},
+                status=400,
+            )
+
+        camera: str = str(body.get("camera", "")).strip()
+        message: str = str(body.get("message", "")).strip()
+
+        if not camera:
+            return web.json_response(
+                {"error": "\"camera\" field is required."},
+                status=400,
+            )
+
+        # Validate camera name — same pattern as the dashboard test endpoint.
+        import re
+        if not re.match(r"^[a-zA-Z0-9_-]+$", camera):
+            return web.json_response(
+                {"error": f"Invalid camera name {camera!r}. Only letters, digits, underscores, hyphens allowed."},
+                status=400,
+            )
+
+        if not message:
+            return web.json_response(
+                {"error": "\"message\" field is required and must be non-empty."},
+                status=400,
+            )
+
+        if len(message) > 1000:
+            return web.json_response(
+                {"error": f"Message too long ({len(message)} chars, max 1000)."},
+                status=400,
+            )
+
+        # Optional TTS overrides.
+        tts_override: dict = {}
+        if "voice" in body:
+            tts_override["voice"] = str(body["voice"]).strip()
+        if "provider" in body:
+            tts_override["provider"] = str(body["provider"]).strip()
+        if "speed" in body:
+            with contextlib.suppress(TypeError, ValueError):
+                tts_override["speed"] = float(body["speed"])
+
+        tone: str = str(body.get("tone", "none")).strip()
+        if tone not in ("short", "long", "siren", "none"):
+            tone = "none"
+
+        announce_config = self._build_preview_config(tts_override)
+        start_ts = time.monotonic()
+
+        logger.info("Announce: camera=%s message_len=%d tone=%s", camera, len(message), tone)
+
+        # Step 1: Generate TTS to a temp file.
+        try:
+            fd, tts_path = tempfile.mkstemp(suffix=".wav", prefix="voxwatch_announce_tts_")
+            os.close(fd)
+        except OSError as exc:
+            logger.error("Announce: could not create temp file: %s", exc)
+            return web.json_response(
+                {"error": "Server error: could not create temp file."},
+                status=500,
+            )
+
+        original_config = self._audio.config
+        try:
+            self._audio.config = announce_config
+            tts_ok = await self._audio.generate_tts(message, tts_path)
+        finally:
+            self._audio.config = original_config
+
+        if not tts_ok or not os.path.exists(tts_path):
+            with contextlib.suppress(OSError):
+                os.unlink(tts_path)
+            logger.error("Announce: TTS generation failed for camera=%s", camera)
+            return web.json_response(
+                {"error": "TTS generation failed. Check VoxWatch logs."},
+                status=500,
+            )
+
+        # Step 2: Convert to camera-compatible codec.
+        try:
+            fd2, output_path = tempfile.mkstemp(suffix=".wav", prefix="voxwatch_announce_out_")
+            os.close(fd2)
+        except OSError as exc:
+            with contextlib.suppress(OSError):
+                os.unlink(tts_path)
+            return web.json_response(
+                {"error": "Server error: could not create temp file."},
+                status=500,
+            )
+
+        convert_ok = await self._audio.convert_audio(tts_path, output_path)
+        # Clean up TTS intermediate file.
+        with contextlib.suppress(OSError):
+            os.unlink(tts_path)
+
+        if not convert_ok:
+            with contextlib.suppress(OSError):
+                os.unlink(output_path)
+            logger.error("Announce: audio conversion failed for camera=%s", camera)
+            return web.json_response(
+                {"error": "Audio conversion failed."},
+                status=500,
+            )
+
+        # Step 3: Optionally prepend attention tone.
+        audio_to_push = output_path
+        toned_path = None
+        if tone != "none":
+            toned = await self._audio.prepend_tone(output_path, tone)
+            if toned != output_path:
+                toned_path = toned
+                audio_to_push = toned
+
+        # Step 4: Copy to serve directory so go2rtc can fetch it via HTTP.
+        import shutil
+        serve_filename = f"announce_{camera}_{int(time.time())}.wav"
+        serve_path = os.path.join(self._audio._serve_dir, serve_filename)
+        try:
+            shutil.copy2(audio_to_push, serve_path)
+        except OSError as exc:
+            logger.error("Announce: could not copy to serve dir: %s", exc)
+            for p in [output_path, toned_path]:
+                if p:
+                    with contextlib.suppress(OSError):
+                        os.unlink(p)
+            return web.json_response(
+                {"error": "Could not prepare audio for delivery."},
+                status=500,
+            )
+
+        # Clean up temp files.
+        for p in [output_path, toned_path]:
+            if p:
+                with contextlib.suppress(OSError):
+                    os.unlink(p)
+
+        # Step 5: Warmup backchannel + push.
+        await self._audio.warmup_backchannel(camera)
+        push_ok = await self._audio.push_audio(camera, serve_path)
+
+        # Clean up the served file after a delay (go2rtc needs time to fetch it).
+        async def _deferred_cleanup():
+            import asyncio
+            await asyncio.sleep(30)
+            with contextlib.suppress(OSError):
+                os.unlink(serve_path)
+
+        import asyncio
+        asyncio.create_task(_deferred_cleanup())
+
+        elapsed_ms = int((time.monotonic() - start_ts) * 1000)
+
+        if push_ok:
+            logger.info("Announce: success camera=%s elapsed_ms=%d", camera, elapsed_ms)
+            return web.json_response({
+                "success": True,
+                "camera": camera,
+                "duration_ms": elapsed_ms,
+            })
+        else:
+            logger.error("Announce: push failed for camera=%s", camera)
+            return web.json_response(
+                {"success": False, "camera": camera, "error": "Audio push to go2rtc failed."},
+                status=502,
+            )
 
     # ── Preview generators ────────────────────────────────────────────────────
 
