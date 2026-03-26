@@ -19,13 +19,9 @@ import {
   ChevronDown,
   ChevronUp,
   ArrowRight,
-  Play,
-  Loader,
   Quote,
 } from 'lucide-react';
-import { useMutation } from '@tanstack/react-query';
 import { cn } from '@/utils/cn';
-import { previewAudio } from '@/api/status';
 
 /** Props for ResponseModeStep. */
 interface ResponseModeStepProps {
@@ -187,24 +183,14 @@ function ModeCard({
  */
 export function ResponseModeStep({
   responseMode: initialMode,
-  ttsEngine,
-  ttsVoice,
+  ttsEngine: _ttsEngine,
+  ttsVoice: _ttsVoice,
   onNext,
 }: ResponseModeStepProps) {
   const [mode, setMode] = useState(initialMode);
   const [showFun, setShowFun] = useState(false);
 
   const selectedModeDef = ALL_MODES.find((m) => m.id === mode);
-
-  const previewMutation = useMutation({
-    mutationFn: () =>
-      previewAudio({ persona: mode, voice: ttsVoice, provider: ttsEngine }),
-    onSuccess: (result) => {
-      const url = URL.createObjectURL(result.blob);
-      const audio = new Audio(url);
-      audio.play().catch(() => {});
-    },
-  });
 
   return (
     <div className="space-y-6 px-6 py-8">
@@ -266,26 +252,10 @@ export function ResponseModeStep({
         </div>
       )}
 
-      {/* Preview voice */}
-      <button
-        type="button"
-        onClick={() => previewMutation.mutate()}
-        disabled={previewMutation.isPending}
-        className={cn(
-          'flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold',
-          'border border-gray-600 bg-gray-800 text-gray-300 hover:bg-gray-700',
-          'transition-all active:scale-[0.98]',
-          'focus:outline-none focus:ring-2 focus:ring-blue-500',
-          'disabled:cursor-not-allowed disabled:opacity-50',
-        )}
-      >
-        {previewMutation.isPending ? (
-          <Loader className="h-4 w-4 animate-spin" />
-        ) : (
-          <Play className="h-4 w-4" />
-        )}
-        {previewMutation.isPending ? 'Generating preview...' : 'Preview this voice'}
-      </button>
+      {/* Voice preview available after setup in the dashboard */}
+      <p className="text-xs text-gray-500 text-center">
+        Voice preview is available in the dashboard after setup completes.
+      </p>
 
       {/* Continue */}
       <button
