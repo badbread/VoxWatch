@@ -36,7 +36,6 @@ Usage:
 import asyncio
 import logging
 import os
-from typing import Optional
 
 from voxwatch.tts.base import TTSProvider, TTSProviderError, TTSResult
 
@@ -83,11 +82,11 @@ class PollyProvider(TTSProvider):
         self._voice_id: str = tts_cfg.get("polly_voice_id", "Matthew")
         self._engine: str = tts_cfg.get("polly_engine", "neural")
         self._timeout: int = int(tts_cfg.get("polly_timeout", 30))
-        self._access_key_id: Optional[str] = (
+        self._access_key_id: str | None = (
             tts_cfg.get("aws_access_key_id")
             or os.environ.get("AWS_ACCESS_KEY_ID")
         )
-        self._secret_access_key: Optional[str] = (
+        self._secret_access_key: str | None = (
             tts_cfg.get("aws_secret_access_key")
             or os.environ.get("AWS_SECRET_ACCESS_KEY")
         )
@@ -137,7 +136,7 @@ class PollyProvider(TTSProvider):
                 loop.run_in_executor(None, self._call_api, message, output_path),
                 timeout=self._timeout + 5,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             raise TTSProviderError(
                 self.name,
                 f"API call timed out after {self._timeout}s",
@@ -175,7 +174,6 @@ class PollyProvider(TTSProvider):
         Raises:
             TTSProviderError: If Polly returns an error or IO fails.
         """
-        import struct
         import wave
 
         import boto3  # type: ignore[import]

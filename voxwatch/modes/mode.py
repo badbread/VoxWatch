@@ -30,7 +30,6 @@ Category values::
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
 
 
 @dataclass
@@ -73,10 +72,10 @@ class VoiceConfig:
         piper_model: Piper model name (e.g. "en_US-lessac-medium").
     """
 
-    kokoro_voice: Optional[str] = None
-    openai_voice: Optional[str] = None
-    elevenlabs_voice: Optional[str] = None
-    piper_model: Optional[str] = None
+    kokoro_voice: str | None = None
+    openai_voice: str | None = None
+    elevenlabs_voice: str | None = None
+    piper_model: str | None = None
 
 
 @dataclass

@@ -137,7 +137,7 @@ async def apply_natural_postprocess(input_path: str, output_path: str) -> bool:
         )
         return True
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error(
             "apply_natural_postprocess: ffmpeg timed out after %ds", _SUBPROCESS_TIMEOUT
         )

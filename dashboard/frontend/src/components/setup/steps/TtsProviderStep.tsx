@@ -33,12 +33,8 @@ import {
   Globe,
   Star,
   ArrowRight,
-  Loader,
-  Play,
 } from 'lucide-react';
-import { useMutation } from '@tanstack/react-query';
 import { cn } from '@/utils/cn';
-import { previewAudio } from '@/api/status';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -281,24 +277,7 @@ function ProviderConfigPanel({ engineId, config, onChange }: ProviderConfigPanel
  *
  * Rules:
  *   piper / espeak → always enabled (local, no credentials needed).
- *   kokoro         → enabled when kokoro_host is filled.
- *   cloud engines  → enabled when api_key is non-empty.
- *   polly          → enabled when aws_region is filled (credentials via env).
  */
-function isPreviewEnabled(engineId: string, config: TtsProviderConfig): boolean {
-  switch (engineId) {
-    case 'piper':
-    case 'espeak':
-      return true;
-    case 'kokoro':
-      return Boolean(config.kokoro_host?.trim());
-    case 'polly':
-      return Boolean(config.aws_region?.trim());
-    default:
-      // elevenlabs, openai, cartesia
-      return Boolean(config.api_key?.trim());
-  }
-}
 
 // ---------------------------------------------------------------------------
 // TtsProviderStep
@@ -321,7 +300,7 @@ export function TtsProviderStep({
   ttsEngine: initialEngine,
   ttsVoice: initialVoice,
   ttsProviderConfig: initialProviderConfig,
-  responseMode,
+  responseMode: _responseMode,
   onNext,
 }: TtsProviderStepProps) {
   const [engine, setEngine] = useState(initialEngine);
@@ -338,23 +317,6 @@ export function TtsProviderStep({
     // Reset provider config when switching engines to avoid stale values
     setProviderConfig({});
   };
-
-  const previewEnabled = isPreviewEnabled(engine, providerConfig);
-
-  const previewMutation = useMutation({
-    mutationFn: () =>
-      previewAudio({
-        persona: responseMode,
-        voice,
-        provider: engine,
-        provider_host: providerConfig.kokoro_host,
-      }),
-    onSuccess: (result) => {
-      const url = URL.createObjectURL(result.blob);
-      const audio = new Audio(url);
-      audio.play().catch(() => {/* user gesture required on some browsers */});
-    },
-  });
 
   const EngineCard = ({ def }: { def: TtsEngineDef }) => {
     const Icon = def.icon;

@@ -27,10 +27,8 @@ Usage:
     result = await provider.generate("Authorities contacted.", "/tmp/out.mp3")
 """
 
-import asyncio
 import logging
 import os
-from typing import Optional
 
 from voxwatch.tts.base import TTSProvider, TTSProviderError, TTSResult
 
@@ -77,7 +75,7 @@ class OpenAIProvider(TTSProvider):
 
         tts_cfg = config.get("tts", {})
 
-        api_key: Optional[str] = (
+        api_key: str | None = (
             tts_cfg.get("openai_api_key")
             or os.environ.get("OPENAI_API_KEY")
         )
@@ -171,7 +169,7 @@ class OpenAIProvider(TTSProvider):
 
         except TTSProviderError:
             raise
-        except asyncio.TimeoutError:
+        except TimeoutError:
             raise TTSProviderError(
                 self.name,
                 f"Request timed out after {self._timeout}s",

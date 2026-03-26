@@ -35,6 +35,7 @@ Signal handling:
 
 import argparse
 import asyncio
+import contextlib
 import json
 import logging
 import logging.handlers
@@ -42,48 +43,50 @@ import os
 import signal
 import sys
 import time
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 import paho.mqtt.client as mqtt
 
-from voxwatch.config import load_config, load_config_or_none, reload_config
-from voxwatch.audio_pipeline import AudioPipeline
 from voxwatch.ai_vision import (
     DEFAULT_MESSAGES,
-    get_dispatch_initial_message,
     _get_active_mode,
+    analyze_snapshots,
+    analyze_video,
+    check_person_still_present,
+    get_dispatch_initial_message,
     get_stage2_prompt,
     get_stage3_prompt,
     grab_snapshots,
     grab_video_clip,
-    analyze_snapshots,
-    analyze_video,
-    check_person_still_present,
+)
+from voxwatch.ai_vision import (
     close_session as close_ai_session,
+)
+from voxwatch.audio_pipeline import AudioPipeline
+from voxwatch.conditions import (
+    check_cooldown,
+    is_active_hours,
+)
+from voxwatch.config import load_config_or_none, reload_config
+from voxwatch.modes import (
+    build_ai_vars,
+    get_mode_template,
 )
 from voxwatch.modes import (
     get_active_mode as get_active_mode_obj,
-    get_mode_template,
-    build_ai_vars,
-    extract_ai_vars_from_dispatch_json,
 )
 from voxwatch.radio_dispatch import (
-    DISPATCH_PERSONAS,   # backward-compat alias for DISPATCH_MODES
     DISPATCH_MODES,
-    segment_dispatch_message,
     compose_dispatch_audio,
-)
-from voxwatch.conditions import (
-    is_active_hours,
-    check_cooldown,
+    segment_dispatch_message,
 )
 from voxwatch.telemetry import (
-    write_status_file,
     append_event_log,
     ensure_camera_stats,
-    record_detection,
     record_audio_push,
+    record_detection,
+    write_status_file,
 )
 
 logger = logging.getLogger("voxwatch.service")
@@ -103,7 +106,7 @@ STATUS_WRITE_INTERVAL = 5
 SERVICE_VERSION = "0.2.0"
 
 
-def _try_parse_phrase_list(ai_description: Optional[str]) -> list[str]:
+def _try_parse_phrase_list(ai_description: str | None) -> list[str]:
     """Attempt to parse an AI description string as a JSON array of phrases.
 
     Used by ``_run_escalation`` and ``_handle_detection`` to detect when the AI
@@ -191,8 +194,8 @@ class VoxWatchService:
         # access config concurrently, so we need mutual exclusion.
         self._config_lock: asyncio.Lock = asyncio.Lock()
         self._audio = AudioPipeline(config)
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
-        self._mqtt_client: Optional[mqtt.Client] = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._mqtt_client: mqtt.Client | None = None
         # camera_name -> UNIX monotonic timestamp of last successful trigger
         self._cooldowns: dict[str, float] = {}
         self._running = False
@@ -201,11 +204,11 @@ class VoxWatchService:
 
         # ── Dashboard telemetry state ──────────────────────────────────────
         # Set to a real datetime in start() once the event loop is running.
-        self._started_at: Optional[datetime] = None
+        self._started_at: datetime | None = None
         # Background asyncio Task that writes /data/status.json every N seconds.
-        self._status_task: Optional[asyncio.Task] = None
+        self._status_task: asyncio.Task | None = None
         # Background asyncio Task that polls config mtime and triggers hot-reloads.
-        self._config_watch_task: Optional[asyncio.Task] = None
+        self._config_watch_task: asyncio.Task | None = None
         # Per-camera counters, populated lazily when the first detection arrives.
         # Structure per camera:
         #   {
@@ -219,7 +222,7 @@ class VoxWatchService:
         # Preview API — started in start(), stopped in the shutdown sequence.
         # Typed as Optional[Any] to avoid a circular import at module level;
         # the actual type is PreviewAPI from voxwatch.preview_api.
-        self._preview_api: Optional[Any] = None
+        self._preview_api: Any | None = None
 
     # ── Public lifecycle ──────────────────────────────────────────────────────
 
@@ -236,7 +239,7 @@ class VoxWatchService:
         self._running = True
         # Record the exact moment the service became operational.  Used by the
         # status writer to compute uptime and stamp the status payload.
-        self._started_at = datetime.now(tz=timezone.utc)
+        self._started_at = datetime.now(tz=UTC)
 
         # Ensure the shared data directory exists before writing any files.
         os.makedirs(DATA_DIR, exist_ok=True)
@@ -317,19 +320,15 @@ class VoxWatchService:
         # Stop the config watcher first so no reload can race with shutdown.
         if self._config_watch_task and not self._config_watch_task.done():
             self._config_watch_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._config_watch_task
-            except asyncio.CancelledError:
-                pass
 
         # Stop the status writer and do one final write so the dashboard shows
         # service_running: false rather than stale data.
         if self._status_task and not self._status_task.done():
             self._status_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._status_task
-            except asyncio.CancelledError:
-                pass
         self._write_status_file()
         logger.info("Final status.json written.")
 
@@ -661,15 +660,15 @@ class VoxWatchService:
         # time.monotonic() (not time.time()) for latency because it is
         # not affected by clock adjustments.
         _pipeline_start_ts = time.monotonic()
-        detection_utc = datetime.now(tz=timezone.utc)
+        detection_utc = datetime.now(tz=UTC)
         record_detection(self._camera_stats, camera_name, detection_utc)
 
         # Initialise result accumulators for the event log entry.  These are
         # filled in as each stage completes and passed to append_event_log at
         # the bottom of this method.
-        _initial_audio_success: Optional[bool] = None
-        _escalation_description: Optional[str] = None
-        _escalation_audio_success: Optional[bool] = None
+        _initial_audio_success: bool | None = None
+        _escalation_description: str | None = None
+        _escalation_audio_success: bool | None = None
         _escalation_ran: bool = False
 
         # ── Initial Response + AI prep (concurrent) ───────────────────────
@@ -760,7 +759,7 @@ class VoxWatchService:
 
             # ── Step E: Escalation ─────────────────────────────────────────
             _escalation_ran = True
-            ai_description: Optional[str] = await ai_prep_task
+            ai_description: str | None = await ai_prep_task
             _escalation_description = ai_description
 
             s_esc_description, s_esc_push_ok = await self._run_escalation(
@@ -885,8 +884,8 @@ class VoxWatchService:
         camera_name: str,
         camera_stream: str,
         mode_name: str,
-        ai_description: Optional[str],
-    ) -> tuple[Optional[str], bool]:
+        ai_description: str | None,
+    ) -> tuple[str | None, bool]:
         """Run the Escalation stage if the person is still present.
 
         The Escalation stage is the primary deterrent response.  It:
@@ -1001,9 +1000,9 @@ class VoxWatchService:
 
         if cadence_enabled and ai_phrases:
             # Build the full phrase list: template phrase + AI phrases.
-            # The escalation_template may itself be a single short sentence, so
+            # The escalation_message may itself be a single short sentence, so
             # we prepend it as the first element.
-            full_phrases = [escalation_template] + ai_phrases
+            full_phrases = [escalation_message] + ai_phrases
             import os as _os
             cadence_path = _os.path.join(
                 self._audio._serve_dir, "escalation_cadence_tts.wav"
@@ -1025,15 +1024,11 @@ class VoxWatchService:
                         push_ok = await self._audio.push_audio(camera_stream, audio_to_push)
                         # Cleanup temp files.
                         for _p in [cadence_path, converted_path]:
-                            try:
+                            with contextlib.suppress(OSError):
                                 _os.remove(_p)
-                            except OSError:
-                                pass
                         if audio_to_push not in (cadence_path, converted_path):
-                            try:
+                            with contextlib.suppress(OSError):
                                 _os.remove(audio_to_push)
-                            except OSError:
-                                pass
                         return ai_description, push_ok
                 logger.warning(
                     "Escalation [%s]: natural cadence failed — falling back to flat TTS",
@@ -1056,7 +1051,7 @@ class VoxWatchService:
         self,
         event_id: str,
         camera_name: str,
-    ) -> tuple[Optional[str], Optional[str]]:
+    ) -> tuple[str | None, str | None]:
         """Run behavioral video/snapshot analysis for the Escalation stage.
 
         Attempts to grab a video clip from Frigate and analyze it.  Falls back
@@ -1149,7 +1144,7 @@ class VoxWatchService:
     async def _play_dispatch_escalation(
         self,
         camera_stream: str,
-        ai_output: Optional[str],
+        ai_output: str | None,
     ) -> bool:
         """Play segmented dispatch audio for the Escalation stage.
 
@@ -1198,10 +1193,8 @@ class VoxWatchService:
 
         if composed and os.path.exists(composed):
             ok = await self._audio.push_audio(camera_stream, composed)
-            try:
+            with contextlib.suppress(OSError):
                 os.remove(composed)
-            except OSError:
-                pass
             return ok
 
         logger.warning("Escalation dispatch: composition failed — falling back to plain TTS.")
@@ -1239,7 +1232,7 @@ class VoxWatchService:
         camera_name: str,
         snapshot_count: int,
         snapshot_interval_ms: int,
-    ) -> Optional[str]:
+    ) -> str | None:
         """Grab snapshots and return an AI description of the person's appearance.
 
         Runs concurrently with Initial Response audio playback to hide AI latency.
@@ -1293,7 +1286,7 @@ class VoxWatchService:
         event_id: str,
         camera_name: str,
         camera_stream: str,
-    ) -> tuple[Optional[str], bool]:
+    ) -> tuple[str | None, bool]:
         """Backward-compatibility alias for ``_run_escalation``.
 
         .. deprecated::
@@ -1566,7 +1559,7 @@ class VoxWatchService:
     async def _play_dispatch_stage2(
         self,
         camera_stream: str,
-        ai_output: Optional[str],
+        ai_output: str | None,
     ) -> bool:
         """Generate and push segmented dispatch audio for Stage 2.
 
@@ -1621,10 +1614,8 @@ class VoxWatchService:
             logger.info("Stage 2 dispatch: pushing composed audio to %s...", camera_stream)
             ok = await self._audio.push_audio(camera_stream, composed)
             # Clean up the composed file after push
-            try:
+            with contextlib.suppress(OSError):
                 os.remove(composed)
-            except OSError:
-                pass
             return ok
 
         # Composition failed entirely — fall back to plain TTS with the raw text
@@ -1639,7 +1630,7 @@ class VoxWatchService:
     async def _play_dispatch_stage3(
         self,
         camera_stream: str,
-        ai_output: Optional[str],
+        ai_output: str | None,
     ) -> bool:
         """Generate and push segmented dispatch audio for Stage 3.
 
@@ -1688,10 +1679,8 @@ class VoxWatchService:
         if composed and os.path.exists(composed):
             logger.info("Stage 3 dispatch: pushing composed audio to %s...", camera_stream)
             ok = await self._audio.push_audio(camera_stream, composed)
-            try:
+            with contextlib.suppress(OSError):
                 os.remove(composed)
-            except OSError:
-                pass
             return ok
 
         logger.warning(
@@ -1741,7 +1730,7 @@ class VoxWatchService:
         """
         return self._is_dispatch_mode()
 
-    def _get_scene_context(self, camera_name: str) -> Optional[str]:
+    def _get_scene_context(self, camera_name: str) -> str | None:
         """Get the scene context string for a camera from config.
 
         Scene context gives the AI spatial awareness so it can reference
@@ -1778,7 +1767,7 @@ class VoxWatchService:
 
 def setup_logging(
     level_str: str,
-    log_file: Optional[str],
+    log_file: str | None,
     max_bytes: int = 10 * 1024 * 1024,
     backup_count: int = 5,
 ) -> None:

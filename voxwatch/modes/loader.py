@@ -53,7 +53,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 from voxwatch.modes.mode import (
     BehaviorConfig,
@@ -126,9 +126,9 @@ def _mode(
     effect: str,
     stages: dict[str, StageConfig],
     *,
-    tone: Optional[ToneConfig] = None,
-    voice: Optional[VoiceConfig] = None,
-    behavior: Optional[BehaviorConfig] = None,
+    tone: ToneConfig | None = None,
+    voice: VoiceConfig | None = None,
+    behavior: BehaviorConfig | None = None,
 ) -> ResponseMode:
     """Convenience constructor for a ResponseMode.
 
@@ -933,7 +933,7 @@ def load_modes(config: dict) -> dict[str, ResponseMode]:
 
 def get_active_mode(
     config: dict,
-    camera_name: Optional[str] = None,
+    camera_name: str | None = None,
 ) -> ResponseMode:
     """Resolve and return the active ResponseMode for a given detection event.
 
@@ -1170,7 +1170,7 @@ def extract_ai_vars_from_dispatch_json(ai_json_str: str) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 
-def _resolve_mode_id(config: dict, camera_name: Optional[str]) -> str:
+def _resolve_mode_id(config: dict, camera_name: str | None) -> str:
     """Resolve the effective mode ID from config and optional camera override.
 
     Args:

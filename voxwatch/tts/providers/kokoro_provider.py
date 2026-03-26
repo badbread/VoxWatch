@@ -33,7 +33,7 @@ Usage:
 import asyncio
 import logging
 import os
-from typing import Any, Optional
+from typing import Any
 
 import aiohttp
 
@@ -77,13 +77,13 @@ class KokoroProvider(TTSProvider):
         kokoro_cfg = tts_cfg.get("kokoro", {})
         self._voice: str = kokoro_cfg.get("voice", tts_cfg.get("kokoro_voice", "af_heart"))
         self._speed: float = float(kokoro_cfg.get("speed", tts_cfg.get("kokoro_speed", 1.0)))
-        self._host: Optional[str] = kokoro_cfg.get("host", tts_cfg.get("kokoro_host"))
+        self._host: str | None = kokoro_cfg.get("host", tts_cfg.get("kokoro_host"))
         self._device: str = kokoro_cfg.get("device", tts_cfg.get("kokoro_device", "cpu"))
         # Filter out null/empty host
         if self._host in (None, "", "null"):
             self._host = None
-        self._kokoro: Optional[Any] = None
-        self._session: Optional[aiohttp.ClientSession] = None
+        self._kokoro: Any | None = None
+        self._session: aiohttp.ClientSession | None = None
 
         if self._host:
             # Remote mode — no local dependencies needed

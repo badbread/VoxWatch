@@ -33,13 +33,14 @@ single JSON event line.  No explicit locking is needed for this single-writer
 scenario.
 """
 
+import contextlib
 import json
 import logging
 import os
 import tempfile
 import time
-from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 logger = logging.getLogger("voxwatch.telemetry")
 
@@ -133,7 +134,7 @@ def record_audio_push(
 def write_status_file(
     config: dict[str, Any],
     data_dir: str,
-    started_at: Optional[datetime],
+    started_at: datetime | None,
     running: bool,
     camera_stats: dict[str, dict[str, Any]],
     cooldowns: dict[str, float],
@@ -190,7 +191,7 @@ def write_status_file(
             configured active-hours window.
         service_version: Version string (e.g. ``"0.2.0"``).
     """
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
 
     # Compute uptime — guard against started_at not yet being set (belt-and-
     # suspenders; this should always be set before any write is requested).
@@ -212,7 +213,7 @@ def write_status_file(
 
         # Determine cooldown_until: if the camera fired recently, calculate
         # when the cooldown expires and express it as a UTC ISO string.
-        cooldown_until: Optional[str] = None
+        cooldown_until: str | None = None
         last_trigger = cooldowns.get(cam_name)
         if last_trigger is not None:
             elapsed = time.monotonic() - last_trigger
@@ -258,10 +259,8 @@ def write_status_file(
             os.replace(tmp_path, status_path)
         except Exception:
             # Clean up the temp file if the write or replace failed.
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(tmp_path)
-            except OSError:
-                pass
             raise
     except Exception as exc:
         logger.warning("Could not write %s: %s", status_path, exc)

@@ -33,12 +33,12 @@ Non-fatal design:
     the API is up.
 """
 
+import contextlib
 import json
 import logging
 import os
 import tempfile
 import time
-from typing import Optional
 
 from aiohttp import web
 
@@ -103,7 +103,7 @@ class PreviewAPI:
         self._app.router.add_post("/api/preview/generate-intro", self._handle_generate_intro)
         self._app.router.add_get("/api/health", self._handle_health)
 
-        self._runner: Optional[web.AppRunner] = None
+        self._runner: web.AppRunner | None = None
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -138,10 +138,8 @@ class PreviewAPI:
             )
             # Clean up the runner so stop() is a no-op.
             if self._runner:
-                try:
+                with contextlib.suppress(Exception):
                     await self._runner.cleanup()
-                except Exception:
-                    pass
                 self._runner = None
             return False
         except Exception as exc:
@@ -240,10 +238,8 @@ class PreviewAPI:
         if "provider" in body:
             tts_override["provider"] = str(body["provider"]).strip()
         if "speed" in body:
-            try:
+            with contextlib.suppress(TypeError, ValueError):
                 tts_override["speed"] = float(body["speed"])
-            except (TypeError, ValueError):
-                pass
 
         # Build a config snapshot that includes any TTS overrides.
         preview_config = self._build_preview_config(tts_override)
@@ -281,10 +277,8 @@ class PreviewAPI:
             )
         finally:
             # Always delete the temp file — callers never reuse it.
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(wav_path)
-            except OSError:
-                pass
 
         logger.info(
             "Preview generated: mode=%s elapsed_ms=%d bytes=%d",
@@ -384,10 +378,8 @@ class PreviewAPI:
         if "voice" in body:
             tts_override["voice"] = str(body["voice"]).strip()
         if "speed" in body:
-            try:
+            with contextlib.suppress(TypeError, ValueError):
                 tts_override["speed"] = float(body["speed"])
-            except (TypeError, ValueError):
-                pass
 
         save: bool = bool(body.get("save", False))
 
@@ -417,10 +409,8 @@ class PreviewAPI:
 
         if not success or not os.path.exists(tmp_path):
             logger.error("generate-intro: TTS generation failed for text: %s", text[:80])
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(tmp_path)
-            except OSError:
-                pass
             return web.json_response(
                 {"error": "TTS generation failed. Check VoxWatch logs for details."},
                 status=500,
@@ -459,10 +449,8 @@ class PreviewAPI:
                 status=500,
             )
         finally:
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(tmp_path)
-            except OSError:
-                pass
 
         logger.info(
             "generate-intro: synthesised %d bytes in %d ms (save=%s)",
@@ -487,7 +475,7 @@ class PreviewAPI:
         config: dict,
         response_mode: str,
         custom_message: str,
-    ) -> Optional[str]:
+    ) -> str | None:
         """Generate the full dispatch audio sequence and return the WAV path.
 
         Calls the same ``segment_dispatch_message`` → ``compose_dispatch_audio``
@@ -517,8 +505,8 @@ class PreviewAPI:
             failed.  The caller is responsible for deleting the file.
         """
         from voxwatch.radio_dispatch import (
-            segment_dispatch_message,
             compose_dispatch_audio,
+            segment_dispatch_message,
         )
 
         # Choose dispatch segments: caller text gets wrapped in a minimal JSON
@@ -571,10 +559,8 @@ class PreviewAPI:
             return composed
 
         # compose_dispatch_audio failed — clean up the empty temp file.
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(output_path)
-        except OSError:
-            pass
         return None
 
     async def _generate_tts_preview(
@@ -582,7 +568,7 @@ class PreviewAPI:
         config: dict,
         response_mode: str,
         custom_message: str,
-    ) -> Optional[str]:
+    ) -> str | None:
         """Generate a clean TTS preview for non-dispatch response modes.
 
         Uses ``AudioPipeline.generate_tts`` directly.  No radio effects are
@@ -635,10 +621,8 @@ class PreviewAPI:
         logger.error(
             "Preview API: generate_tts failed for mode '%s'", response_mode
         )
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(output_path)
-        except OSError:
-            pass
         return None
 
     # ── Helpers ───────────────────────────────────────────────────────────────

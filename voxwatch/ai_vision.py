@@ -58,7 +58,6 @@ Prerequisites:
 import asyncio
 import base64
 import logging
-from typing import Optional
 
 import aiohttp
 
@@ -95,7 +94,7 @@ logger = logging.getLogger("voxwatch.ai_vision")
 # connection pool for every HTTP call (snapshot fetches, Ollama, Frigate checks).
 # The session is created lazily by _get_session() on first use so that no
 # network resources are allocated at import time or before the event loop starts.
-_session: Optional[aiohttp.ClientSession] = None
+_session: aiohttp.ClientSession | None = None
 
 
 async def init_session() -> None:
@@ -565,7 +564,7 @@ def _get_active_mode(config: dict) -> tuple[str, dict]:
     return mode_name, mode_cfg
 
 
-def get_stage2_prompt(config: dict, camera_name: Optional[str] = None) -> str:
+def get_stage2_prompt(config: dict, camera_name: str | None = None) -> str:
     """Build the Stage 2 AI prompt using the active mode's prompt_modifier.
 
     Delegates to the :mod:`voxwatch.modes` loader, which resolves the active
@@ -646,7 +645,7 @@ def get_stage2_prompt(config: dict, camera_name: Optional[str] = None) -> str:
     return base
 
 
-def get_stage3_prompt(config: dict, camera_name: Optional[str] = None) -> str:
+def get_stage3_prompt(config: dict, camera_name: str | None = None) -> str:
     """Build the Stage 3 (Escalation) AI prompt using the active mode's modifier.
 
     Identical logic to :func:`get_stage2_prompt` but returns the mode's
@@ -800,7 +799,7 @@ async def grab_video_clip(
     config: dict,
     event_id: str,
     duration_seconds: int,
-) -> Optional[bytes]:
+) -> bytes | None:
     """Download an MP4 video clip from Frigate for a specific event.
 
     Frigate generates a clip for an event once sufficient footage has been
@@ -842,7 +841,7 @@ async def grab_video_clip(
                 logger.error("Unexpected HTTP %d fetching clip for event %s",
                              resp.status, event_id)
                 return None
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error("Timed out fetching video clip for event %s (timeout=%ds)",
                      event_id, timeout_seconds)
         return None
@@ -1145,7 +1144,7 @@ async def check_person_still_present(config: dict, camera_name: str) -> bool:
                         camera_name)
             return False
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.warning("Timed out checking person presence on %s", camera_name)
         return False
     except aiohttp.ClientError as exc:
@@ -1809,8 +1808,8 @@ async def _fetch_image(
     session: aiohttp.ClientSession,
     url: str,
     label: str = "image",
-    timeout: Optional[aiohttp.ClientTimeout] = None,
-) -> Optional[bytes]:
+    timeout: aiohttp.ClientTimeout | None = None,
+) -> bytes | None:
     """Fetch a JPEG image from a URL using an existing aiohttp session.
 
     Intended for internal use only.  A per-request ``timeout`` may be supplied
@@ -1835,7 +1834,7 @@ async def _fetch_image(
             else:
                 logger.warning("HTTP %d fetching %s from %s", resp.status, label, url)
                 return None
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.warning("Timed out fetching %s from %s", label, url)
         return None
     except aiohttp.ClientError as exc:

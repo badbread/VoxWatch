@@ -39,17 +39,17 @@ Usage:
 """
 
 import asyncio
+import contextlib
 import http.server
 import logging
 import os
-import time
 import threading
+import time
 import unicodedata
-from typing import Optional
 
 import aiohttp
 
-from voxwatch.tts.factory import get_provider, generate_with_fallback
+from voxwatch.tts.factory import generate_with_fallback, get_provider
 
 logger = logging.getLogger("voxwatch.audio")
 
@@ -131,8 +131,8 @@ class AudioPipeline:
         # Defaults to the go2rtc host (works when VoxWatch and go2rtc share a host).
         # Override with audio_push.serve_host if they are on different machines.
         self._serve_host = push_cfg.get("serve_host", config.get("go2rtc", {}).get("host", "localhost"))
-        self._http_server: Optional[http.server.HTTPServer] = None
-        self._cached_stage1: Optional[str] = None
+        self._http_server: http.server.HTTPServer | None = None
+        self._cached_stage1: str | None = None
         self._stage1_duration: float = 0.0
         # Primary TTS provider — instantiated and warmed up in initialize()
         self._tts_provider = None
@@ -314,7 +314,7 @@ class AudioPipeline:
             logger.error("ffmpeg conversion failed (exit %d): %s", proc.returncode,
                          stderr.decode("utf-8", errors="replace")[-300:])
             return False
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.error("ffmpeg conversion timed out after %ds", SUBPROCESS_TIMEOUT)
             return False
         except FileNotFoundError:
@@ -441,7 +441,7 @@ class AudioPipeline:
                                 logger.debug("Warmup push accepted")
                             else:
                                 logger.debug("Warmup push returned HTTP %d (continuing anyway)", resp.status)
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         logger.debug("Warmup push timed out (continuing anyway)")
 
                     # Wait for 0.1s silence to finish + backchannel establishment
@@ -501,7 +501,7 @@ class AudioPipeline:
                         logger.error("go2rtc rejected audio push (HTTP %d): %s",
                                      resp.status, body[:200])
                         return False
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.error("go2rtc audio push timed out after %.0fs", total_timeout)
             return False
         except Exception as e:
@@ -686,12 +686,12 @@ class AudioPipeline:
                         proc.returncode,
                         stderr.decode("utf-8", errors="replace")[-300:],
                     )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.warning("Attention tone generation timed out for '%s'", tone_name)
             except Exception as exc:
                 logger.warning("Could not generate attention tone '%s': %s", tone_name, exc)
 
-    def _resolve_tone_path(self, tone_name: str) -> Optional[str]:
+    def _resolve_tone_path(self, tone_name: str) -> str | None:
         """Resolve an attention tone name or custom path to an absolute file path.
 
         Accepts:
@@ -810,7 +810,7 @@ class AudioPipeline:
                 stderr.decode("utf-8", errors="replace")[-300:],
             )
             return audio_path
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("Tone prepend timed out — playing speech without tone")
             return audio_path
         except Exception as exc:
@@ -818,10 +818,8 @@ class AudioPipeline:
             return audio_path
         finally:
             # Clean up the temporary concat list regardless of outcome.
-            try:
+            with contextlib.suppress(OSError):
                 os.remove(concat_list_path)
-            except OSError:
-                pass
 
     async def _apply_radio_effect(self, audio_path: str) -> None:
         """Apply police radio static effect to an audio file in-place.
@@ -1004,10 +1002,8 @@ class AudioPipeline:
         finally:
             # Remove the temporary toned file; the original cached file is kept.
             if toned_is_temp:
-                try:
+                with contextlib.suppress(OSError):
                     os.remove(audio_to_push)
-                except OSError:
-                    pass
 
         if success:
             # Return the duration of the file actually pushed so the caller
@@ -1103,10 +1099,8 @@ class AudioPipeline:
         if toned_is_temp:
             cleanup_paths.append(audio_to_push)
         for path in cleanup_paths:
-            try:
+            with contextlib.suppress(OSError):
                 os.remove(path)
-            except OSError:
-                pass
 
         return success
 

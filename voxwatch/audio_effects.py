@@ -260,7 +260,7 @@ async def generate_static_assets(output_dir: str) -> dict[str, str]:
                     proc.returncode,
                     stderr.decode("utf-8", errors="replace")[-300:],
                 )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.error(
                 "Timed out generating dispatch asset '%s' after %ds",
                 name,
@@ -372,7 +372,7 @@ async def apply_radio_effect(
         )
         return False
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error(
             "apply_radio_effect timed out after %ds for: %s",
             _SUBPROCESS_TIMEOUT,
@@ -528,7 +528,7 @@ async def compose_dispatch_audio(
             )
             return False
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.error(
                 "compose_dispatch_audio concat timed out after %ds",
                 _SUBPROCESS_TIMEOUT,

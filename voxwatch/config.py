@@ -14,7 +14,7 @@ import logging
 import os
 import re
 import sys
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 
@@ -363,7 +363,7 @@ def load_config(config_path: str) -> dict:
         logger.error("Config file not found: %s", config_path)
         sys.exit(1)
 
-    with open(config_path, "r") as f:
+    with open(config_path) as f:
         try:
             raw_config = yaml.safe_load(f) or {}
         except yaml.YAMLError as e:
@@ -390,7 +390,7 @@ def load_config(config_path: str) -> dict:
     return config
 
 
-def load_config_or_none(config_path: str) -> Optional[dict]:
+def load_config_or_none(config_path: str) -> dict | None:
     """Load and validate config without raising or calling sys.exit on failure.
 
     Identical to ``load_config`` but returns ``None`` instead of exiting the
@@ -412,7 +412,7 @@ def load_config_or_none(config_path: str) -> Optional[dict]:
         # File not yet written — normal during first-run setup.
         return None
 
-    with open(config_path, "r") as f:
+    with open(config_path) as f:
         try:
             raw_config = yaml.safe_load(f) or {}
         except yaml.YAMLError as e:
@@ -451,7 +451,7 @@ def reload_config(config_path: str) -> dict:
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Config file not found: {config_path}")
 
-    with open(config_path, "r") as f:
+    with open(config_path) as f:
         try:
             raw_config = yaml.safe_load(f) or {}
         except yaml.YAMLError as exc:

@@ -20,7 +20,6 @@ Config keys read from ``config["tts"]``:
 
 import logging
 import os
-from typing import Optional
 
 import aiohttp
 
@@ -67,7 +66,7 @@ class ElevenLabsProvider(TTSProvider):
         tts_cfg = config.get("tts", {})
 
         # Prefer config value, fall back to environment variable.
-        api_key: Optional[str] = (
+        api_key: str | None = (
             tts_cfg.get("elevenlabs_api_key")
             or os.environ.get("ELEVENLABS_API_KEY")
         )
@@ -88,7 +87,7 @@ class ElevenLabsProvider(TTSProvider):
         self._stability: float = float(tts_cfg.get("elevenlabs_stability", 0.5))
         self._similarity_boost: float = float(tts_cfg.get("elevenlabs_similarity_boost", 0.75))
         self._timeout: int = int(tts_cfg.get("elevenlabs_timeout", 30))
-        self._session: Optional[aiohttp.ClientSession] = None
+        self._session: aiohttp.ClientSession | None = None
 
         logger.debug(
             "ElevenLabsProvider ready: voice=%s model=%s",
