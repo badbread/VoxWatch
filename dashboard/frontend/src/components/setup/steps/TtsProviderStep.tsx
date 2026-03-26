@@ -46,7 +46,7 @@ import { previewAudio } from '@/api/status';
 
 /** Provider-specific config fields captured for this TTS step. */
 export interface TtsProviderConfig {
-  /** Kokoro server base URL (e.g. http://10.1.10.25:8880). */
+  /** Kokoro server base URL (e.g. http://your-server:8880). */
   kokoro_host?: string;
   /** API key for cloud TTS providers (ElevenLabs, OpenAI, Cartesia). */
   api_key?: string;
@@ -210,7 +210,7 @@ function ProviderConfigPanel({ engineId, config, onChange }: ProviderConfigPanel
           type="url"
           value={config.kokoro_host ?? ''}
           onChange={(e) => onChange({ ...config, kokoro_host: e.target.value })}
-          placeholder="http://10.1.10.25:8880"
+          placeholder="http://your-server:8880"
           autoComplete="off"
           className={inputCls}
         />
@@ -464,44 +464,10 @@ export function TtsProviderStep({
         </div>
       )}
 
-      {/* Voice preview — disabled until required config fields are filled */}
-      <button
-        type="button"
-        onClick={() => previewMutation.mutate()}
-        disabled={!previewEnabled || previewMutation.isPending}
-        title={
-          previewEnabled
-            ? 'Play a sample phrase with the selected voice'
-            : 'Fill in the required fields above to enable preview'
-        }
-        className={cn(
-          'flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold',
-          'border transition-all active:scale-[0.98]',
-          'focus:outline-none focus:ring-2 focus:ring-blue-500',
-          'disabled:cursor-not-allowed disabled:opacity-50',
-          previewEnabled
-            ? 'border-gray-600 bg-gray-800 text-gray-300 hover:bg-gray-700'
-            : 'border-gray-700 bg-gray-900 text-gray-600',
-        )}
-      >
-        {previewMutation.isPending ? (
-          <Loader className="h-4 w-4 animate-spin" />
-        ) : (
-          <Play className="h-4 w-4" />
-        )}
-        {previewMutation.isPending ? 'Generating preview...' : 'Preview voice'}
-      </button>
-
-      {/* Helper text when preview is disabled */}
-      {!previewEnabled && (
-        <p className="text-xs text-gray-600 text-center -mt-3">
-          {engine === 'kokoro'
-            ? 'Enter the Kokoro server URL above to enable preview.'
-            : engine === 'polly'
-              ? 'Enter the AWS region above to enable preview.'
-              : 'Enter an API key above to enable preview.'}
-        </p>
-      )}
+      {/* Voice preview available after setup in the dashboard */}
+      <p className="text-xs text-gray-500 dark:text-gray-500 text-center">
+        Voice preview is available in the dashboard after setup completes.
+      </p>
 
       {/* Continue */}
       <button
