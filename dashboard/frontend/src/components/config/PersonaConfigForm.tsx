@@ -1511,66 +1511,7 @@ export function PersonaConfigForm({ value, onChange, ttsConfig }: PersonaConfigF
         The response mode changes how VoxWatch speaks — the AI still describes the real person.
       </p>
 
-      {/* ── Voice Preview Banner ────────────────────────────────────────────── */}
-      {canPreview && (
-        <div className="rounded-2xl border border-gray-200 bg-gray-50 dark:border-gray-700/40 dark:bg-gray-900/60 p-4 space-y-3">
-          <div className="flex items-center gap-3">
-            <Headphones className="h-4 w-4 text-gray-500 dark:text-gray-400" aria-hidden="true" />
-            <span className="text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-gray-400">
-              Voice Preview
-            </span>
-            {/* Waveform animation — visible while generating */}
-            {previewMutation.isPending && (
-              <span className="flex items-end gap-0.5 h-5" aria-hidden="true">
-                {[...Array(5)].map((_, i) => (
-                  <span
-                    key={i}
-                    className="waveform-bar bg-green-400"
-                    style={{ animationDelay: `${i * 0.12}s` }}
-                  />
-                ))}
-              </span>
-            )}
-          </div>
-
-          <AudioPreview
-            audioBlob={previewMutation.data?.blob ?? null}
-            isLoading={previewMutation.isPending}
-            error={previewError}
-            generationTimeMs={previewMutation.data?.generationTimeMs}
-          />
-
-          {!previewMutation.isPending && (
-            <button
-              type="button"
-              onClick={handlePreview}
-              className={cn(
-                'flex w-full items-center justify-center gap-2.5 rounded-2xl px-6 py-3.5 text-sm font-semibold',
-                'transition-all duration-200 active:scale-[0.98]',
-                'focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
-                previewMutation.isSuccess
-                  ? [
-                      'bg-green-100 border border-green-300 text-green-700 dark:bg-green-900/40 dark:border-green-700/50 dark:text-green-300',
-                      'hover:bg-green-200 dark:hover:bg-green-900/60',
-                    ]
-                  : [
-                      'bg-blue-600 text-white shadow-md shadow-blue-900/30',
-                      'hover:bg-blue-500 hover:shadow-lg hover:shadow-blue-900/40 hover:-translate-y-0.5',
-                    ],
-              )}
-            >
-              <Headphones className="h-5 w-5" aria-hidden="true" />
-              {previewMutation.isSuccess ? 'Regenerate Preview' : 'Preview Voice'}
-            </button>
-          )}
-
-          {!previewMutation.isSuccess && !previewMutation.isError && !previewMutation.isPending && (
-            <p className="text-center text-xs text-gray-500 dark:text-gray-600">
-              Plays a sample clip in your browser — no camera speaker used.
-            </p>
-          )}
-        </div>
-      )}
+      {/* Voice preview available via TTS/Personality > Test Voice on the Tests page */}
 
       {/* ── Core Modes ─────────────────────────────────────────────────────── */}
       <div>
