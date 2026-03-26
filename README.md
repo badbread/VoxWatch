@@ -43,16 +43,16 @@ They know this isn't automated noise. Someone is actually watching. That changes
 ## How It Works
 
 ```
-Frigate NVR        MQTT         VoxWatch Service
-   ┌──────┐        Event    ┌──────────────────┐
-   │Detect│ ──────────────> │ Stage 1: Instant │
-   │Person│                 │ Pre-cached Msg   │
-   └──────┘                 │                  │
-                            │ (AI analysis in  │
-                            │  background)     │
-                            │                  │
-                            │ Stage 2: AI      │
-                            │ Description      │
+Frigate NVR        MQTT         VoxWatch Service         MQTT        Home Assistant
+   ┌──────┐        Event    ┌──────────────────┐       Events    ┌─────────────────┐
+   │Detect│ ──────────────> │ Stage 1: Instant │ ──────────────> │ Lights, Locks,  │
+   │Person│                 │ Pre-cached Msg   │                 │ Notifications,  │
+   └──────┘                 │                  │                 │ Automations     │
+                            │ (AI analysis in  │                 └────────┬────────┘
+                            │  background)     │                          │
+                            │                  │  voxwatch/announce       │
+                            │ Stage 2: AI      │ <───────────────────────┘
+                            │ Description      │  (TTS on camera speakers)
                             │ (if person wait) │
                             │                  │
                             │ Stage 3: Video   │
@@ -441,6 +441,14 @@ response_mode:
     city: "Springfield"
     agency: "County Sheriff"
 
+# MQTT event publishing (Home Assistant)
+mqtt_publish:
+  enabled: true
+  topic_prefix: "voxwatch"
+  include_ai_analysis: true
+  include_snapshot_url: true
+  announce_enabled: true       # Listen for TTS announcements on voxwatch/announce
+
 # Pipeline escalation
 pipeline:
   initial_response:
@@ -579,6 +587,76 @@ See [docs/LEGAL.md](docs/LEGAL.md) for detailed guidance covering US (all states
 
 ---
 
+## Home Assistant Integration
+
+VoxWatch integrates with Home Assistant via MQTT — no custom components needed.
+
+### Two-Way Communication
+
+| Direction | Topic | Purpose |
+|-----------|-------|---------|
+| VoxWatch → HA | `voxwatch/events/detection` | Person detected — trigger lights, notifications |
+| VoxWatch → HA | `voxwatch/events/stage` | Escalation stage fired — conditional automations |
+| VoxWatch → HA | `voxwatch/events/ended` | Detection concluded — restore normal state |
+| VoxWatch → HA | `voxwatch/events/error` | Pipeline error — alert on failures |
+| VoxWatch → HA | `voxwatch/status` | Online/offline status (LWT) — availability sensor |
+| HA → VoxWatch | `voxwatch/announce` | Play TTS announcements on camera speakers |
+
+### TTS Announcements from HA
+
+Use VoxWatch as a TTS announcement system for any camera with a speaker. Publish a JSON message to `voxwatch/announce`:
+
+```yaml
+# Doorbell announcement
+automation:
+  - alias: "Announce doorbell on driveway camera"
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.doorbell
+        to: "on"
+    action:
+      - service: mqtt.publish
+        data:
+          topic: "voxwatch/announce"
+          payload: >
+            {"camera": "driveway", "message": "Someone is at the front door.", "tone": "short"}
+```
+
+```yaml
+# Scheduled morning greeting
+automation:
+  - alias: "Good morning on patio"
+    trigger:
+      - platform: time
+        at: "07:00:00"
+    action:
+      - service: mqtt.publish
+        data:
+          topic: "voxwatch/announce"
+          payload: >
+            {"camera": "patio", "message": "Good morning. Today's forecast is sunny with a high of 75."}
+```
+
+Announce payloads support: `camera` (required), `message` (required), `voice`, `provider`, `speed`, `tone` (`short`/`long`/`siren`/`none`).
+
+A REST API is also available at `POST /api/audio/announce` for non-MQTT integrations.
+
+### VoxWatch Status Sensor
+
+```yaml
+mqtt:
+  binary_sensor:
+    - name: "VoxWatch Status"
+      state_topic: "voxwatch/status"
+      payload_on: "online"
+      payload_off: "offline"
+      device_class: running
+```
+
+**Full documentation with automation examples:** [docs/HOME_ASSISTANT.md](docs/HOME_ASSISTANT.md)
+
+---
+
 ## Architecture
 
 ### Service Structure
@@ -586,15 +664,17 @@ See [docs/LEGAL.md](docs/LEGAL.md) for detailed guidance covering US (all states
 **Core Service** (`voxwatch`)
 - Python 3.11 + FastAPI
 - MQTT listener for Frigate detection events
+- MQTT announce listener for HA-triggered TTS announcements
 - Three-stage escalating deterrent pipeline
 - TTS generation with automatic fallback
 - Audio push via go2rtc HTTP API
+- MQTT event publishing for Home Assistant automations
 - Hot-reload configuration (changes apply without restart)
 - Event logging (events.jsonl) and status monitoring (status.json)
 
 **Dashboard** (`voxwatch-dashboard`)
 - React 18 + TypeScript + Tailwind CSS frontend
-- FastAPI backend with configuration and camera APIs
+- FastAPI backend with configuration, camera, and announce APIs
 - Real-time system status
 - Interactive camera setup wizard
 - Audio test player with rate limiting
@@ -736,11 +816,17 @@ uvicorn main:app --reload
 
 ## Roadmap
 
+### Recently Shipped
+- **Home Assistant Integration** — Two-way MQTT: event publishing + TTS announcements from HA automations
+- **MQTT Event Publishing** — Structured JSON events at every detection stage for automation triggers
+- **TTS Announce API** — Play any message on any camera speaker via MQTT or REST
+- **Persona Customization** — Mood presets, custom dog names, robot presets, operator names
+- **Docker Optimization** — Image size reduced from 1769MB to 911MB (49% reduction)
+
 ### In Progress
 - **Camera Zones** — Group cameras (front door + front yard) so one detection triggers one speaker
 
 ### Planned
-- **Home Assistant Integration** — Push notifications, HA automation triggers
 - **Dynamic TTS Libraries** — Install providers on demand instead of bundling all
 
 ### Community Requests
@@ -784,6 +870,7 @@ https://buymeacoffee.com/badbread
 
 ## More Information
 
+- [Home Assistant Integration](docs/HOME_ASSISTANT.md) — MQTT events, announce API, automation examples
 - [Architecture Guide](docs/ARCHITECTURE.md) — Deep dive into system design
 - [Supported Cameras](docs/SUPPORTED_CAMERAS.md) — Full camera compatibility database
 - [Audio Push Research](docs/AUDIO_PUSH_RESEARCH.md) — Latency analysis and backchannel optimization

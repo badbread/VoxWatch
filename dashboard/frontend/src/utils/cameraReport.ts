@@ -217,6 +217,88 @@ const EMAIL_SPEAKER_TYPE_LABELS: Record<string, string> = {
  * @returns A mailto: URL string suitable for use as an anchor href or
  *   window.open() target.
  */
+/**
+ * Structured email data returned by buildCameraReportEmail() for display
+ * in a copyable popup rather than a mailto: link.
+ */
+export interface CameraReportEmail {
+  to: string;
+  subject: string;
+  body: string;
+}
+
+/**
+ * Builds structured email data (to, subject, body) for a camera compatibility
+ * report. Used by the UI to show a copyable popup instead of relying on
+ * mailto: links, which many browsers cannot handle properly.
+ *
+ * @param params - The same CameraReportParams used by buildCameraReportUrl.
+ * @returns An object with to, subject, and body strings.
+ */
+export function buildCameraReportEmail(params: CameraReportParams): CameraReportEmail {
+  const {
+    manufacturer = '',
+    model = '',
+    firmware,
+    ip,
+    backchannelCodecs,
+    hasBackchannel,
+    audioResult,
+    speakerType,
+    frigateVersion,
+    go2rtcVersion,
+    voxwatchVersion,
+  } = params;
+
+  const mfr = manufacturer || 'Unknown';
+  const mdl = model || 'Unknown';
+
+  const subject = `Camera Report: ${mfr} ${mdl}`;
+
+  const bodyLines: string[] = [
+    'Camera Compatibility Report',
+    '',
+    `Manufacturer: ${mfr}`,
+    `Model: ${mdl}`,
+  ];
+
+  if (firmware) bodyLines.push(`Firmware: ${firmware}`);
+
+  const audioLabel = audioResult
+    ? (EMAIL_AUDIO_RESULT_LABELS[audioResult] ?? audioResult)
+    : 'Did not test';
+  bodyLines.push(`Audio Result: ${audioLabel}`);
+
+  if (speakerType) {
+    const speakerLabel = EMAIL_SPEAKER_TYPE_LABELS[speakerType] ?? speakerType;
+    bodyLines.push(`Speaker Type: ${speakerLabel}`);
+  }
+
+  if (hasBackchannel === false) {
+    bodyLines.push('Backchannel: Not detected by go2rtc');
+  } else if (backchannelCodecs && backchannelCodecs.length > 0) {
+    bodyLines.push(`Backchannel Codecs: ${backchannelCodecs.join(', ')}`);
+  } else if (hasBackchannel === true) {
+    bodyLines.push('Backchannel: Detected (codec unknown)');
+  }
+
+  if (ip) bodyLines.push(`Camera IP: ${ip}`);
+
+  const hasSystemInfo = voxwatchVersion || frigateVersion || go2rtcVersion;
+  if (hasSystemInfo) {
+    bodyLines.push('', 'System Info:');
+    if (voxwatchVersion) bodyLines.push(`VoxWatch: ${voxwatchVersion}`);
+    if (frigateVersion) bodyLines.push(`Frigate: ${frigateVersion}`);
+    if (go2rtcVersion) bodyLines.push(`go2rtc: ${go2rtcVersion}`);
+  }
+
+  return {
+    to: REPORT_EMAIL,
+    subject,
+    body: bodyLines.join('\n'),
+  };
+}
+
 export function buildCameraReportEmailUrl(params: CameraReportParams): string {
   const {
     manufacturer = '',

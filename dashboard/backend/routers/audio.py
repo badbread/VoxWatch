@@ -275,6 +275,147 @@ async def test_audio_push(request: TestAudioRequest) -> TestAudioResponse:
     )
 
 
+# ── Announce endpoint ─────────────────────────────────────────────────────────
+# Purpose-built TTS announcement endpoint for Home Assistant automations and
+# external integrations.  Unlike the test endpoint, this does real TTS synthesis
+# and supports custom voice, provider, speed, and attention tone settings.
+#
+# The dashboard proxies the request to the VoxWatch service's preview API
+# (port 8892) which has access to the full AudioPipeline.
+
+
+class AnnounceRequest(BaseModel):
+    """Request body for POST /api/audio/announce."""
+
+    camera: str = Field(
+        description=(
+            "Target camera name to play the announcement on. "
+            "Must match a go2rtc stream name."
+        )
+    )
+    message: str = Field(
+        description="Text to synthesise and play on the camera speaker.",
+        max_length=1000,
+    )
+    voice: Optional[str] = Field(
+        default=None,
+        description="TTS voice override. Uses configured default when omitted.",
+    )
+    provider: Optional[str] = Field(
+        default=None,
+        description="TTS provider override (kokoro, piper, elevenlabs, etc.).",
+    )
+    speed: Optional[float] = Field(
+        default=None,
+        description="Playback speed multiplier (0.25–4.0).",
+        ge=0.25,
+        le=4.0,
+    )
+    tone: Optional[str] = Field(
+        default=None,
+        description="Attention tone to prepend: 'short', 'long', 'siren', or 'none'.",
+    )
+
+
+class AnnounceResponse(BaseModel):
+    """Response from POST /api/audio/announce."""
+
+    success: bool = Field(description="Whether the announcement was played")
+    camera: str = Field(description="Camera the announcement was sent to")
+    duration_ms: Optional[int] = Field(
+        default=None,
+        description="Total processing time in milliseconds",
+    )
+    error: Optional[str] = Field(
+        default=None,
+        description="Error message if the announcement failed",
+    )
+
+
+@router.post(
+    "/announce",
+    response_model=AnnounceResponse,
+    summary="Play a TTS announcement on a camera speaker",
+    description=(
+        "Synthesises text-to-speech and plays it on a camera speaker via go2rtc. "
+        "Designed for Home Assistant automations and external integrations. "
+        "Supports custom voice, provider, speed, and attention tone settings."
+    ),
+    status_code=status.HTTP_200_OK,
+)
+async def announce(request: AnnounceRequest) -> AnnounceResponse:
+    """Play a TTS announcement on a camera speaker.
+
+    Proxies the request to the VoxWatch service's preview API which has
+    access to the full AudioPipeline for TTS generation, codec conversion,
+    and go2rtc push.
+
+    Args:
+        request: AnnounceRequest with camera, message, and optional overrides.
+
+    Returns:
+        AnnounceResponse with success status and timing.
+    """
+    _validate_camera_name(request.camera)
+
+    # Build the payload for the VoxWatch announce API.
+    payload: dict = {
+        "camera": request.camera,
+        "message": request.message,
+    }
+    if request.voice is not None:
+        payload["voice"] = request.voice
+    if request.provider is not None:
+        payload["provider"] = request.provider
+    if request.speed is not None:
+        payload["speed"] = request.speed
+    if request.tone is not None:
+        payload["tone"] = request.tone
+
+    # Resolve the VoxWatch service preview API URL.
+    cfg = await config_service.get_config()
+    go2rtc_host = cfg.get("go2rtc", {}).get("host", "localhost")
+    preview_port = cfg.get("preview_api_port", 8892)
+    announce_url = f"http://{go2rtc_host}:{preview_port}/api/announce"
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                announce_url,
+                json=payload,
+                timeout=aiohttp.ClientTimeout(total=60),
+            ) as resp:
+                result = await resp.json()
+
+                if resp.status == 200 and result.get("success"):
+                    return AnnounceResponse(
+                        success=True,
+                        camera=request.camera,
+                        duration_ms=result.get("duration_ms"),
+                    )
+                else:
+                    error_msg = result.get("error", f"VoxWatch API returned HTTP {resp.status}")
+                    logger.error(
+                        "Announce failed for camera %s: %s",
+                        request.camera,
+                        error_msg,
+                    )
+                    return AnnounceResponse(
+                        success=False,
+                        camera=request.camera,
+                        error=error_msg,
+                    )
+    except aiohttp.ClientError as exc:
+        logger.error("Announce: VoxWatch service unreachable: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "VoxWatch service is not reachable. "
+                "Ensure the VoxWatch container is running."
+            ),
+        ) from exc
+
+
 # ── Preview endpoint ──────────────────────────────────────────────────────────
 
 # Sample scene description used when the caller does not supply a custom message.

@@ -15,13 +15,14 @@ API integration needed -- just MQTT messages with structured JSON payloads.
 
 All topics are under a configurable prefix (default `voxwatch/`):
 
-| Topic | When | Use For |
-|-------|------|---------|
-| `voxwatch/events/detection` | Person detected | Lights on, notifications |
-| `voxwatch/events/stage` | Stage 1/2/3 fires | Escalating response |
-| `voxwatch/events/ended` | Detection over | Restore normal state |
-| `voxwatch/events/error` | Something failed | Alert on failures |
-| `voxwatch/status` | Startup/shutdown | Online/offline sensor |
+| Topic | Direction | When | Use For |
+|-------|-----------|------|---------|
+| `voxwatch/events/detection` | VoxWatch → HA | Person detected | Lights on, notifications |
+| `voxwatch/events/stage` | VoxWatch → HA | Stage 1/2/3 fires | Escalating response |
+| `voxwatch/events/ended` | VoxWatch → HA | Detection over | Restore normal state |
+| `voxwatch/events/error` | VoxWatch → HA | Something failed | Alert on failures |
+| `voxwatch/status` | VoxWatch → HA | Startup/shutdown | Online/offline sensor |
+| `voxwatch/announce` | HA → VoxWatch | On demand | Play TTS on camera speakers |
 
 ## Event Payloads
 
@@ -115,6 +116,145 @@ mqtt:
       payload_on: "online"
       payload_off: "offline"
       device_class: running
+```
+
+## Announcements (HA → VoxWatch)
+
+VoxWatch can act as a TTS announcement system for your cameras. Publish a
+JSON message to `voxwatch/announce` and VoxWatch will synthesise speech and
+play it on the specified camera's speaker.
+
+### MQTT Announce Payload
+
+```json
+{
+  "camera": "front_door",
+  "message": "Package delivered at front door"
+}
+```
+
+All fields except `camera` and `message` are optional:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `camera` | string | **required** | Target camera name (go2rtc stream) |
+| `message` | string | **required** | Text to speak (max 1000 chars) |
+| `voice` | string | configured | TTS voice override |
+| `provider` | string | configured | TTS provider (kokoro, piper, elevenlabs, etc.) |
+| `speed` | float | 1.0 | Speech speed multiplier (0.25–4.0) |
+| `tone` | string | none | Attention tone: `short`, `long`, `siren`, or `none` |
+
+### REST API Alternative
+
+You can also trigger announcements via HTTP:
+
+```bash
+curl -X POST http://voxwatch-dashboard:33344/api/audio/announce \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "camera": "front_door",
+    "message": "Package delivered at front door",
+    "tone": "short"
+  }'
+```
+
+### Announce Automation Examples
+
+#### Doorbell Announcement
+
+```yaml
+automation:
+  - alias: "Announce doorbell on driveway camera"
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.doorbell
+        to: "on"
+    action:
+      - service: mqtt.publish
+        data:
+          topic: "voxwatch/announce"
+          payload: >
+            {"camera": "driveway", "message": "Someone is at the front door.", "tone": "short"}
+```
+
+#### Good Morning Schedule
+
+```yaml
+automation:
+  - alias: "Good morning announcement on patio"
+    trigger:
+      - platform: time
+        at: "07:00:00"
+    condition:
+      - condition: state
+        entity_id: person.jason
+        state: "home"
+    action:
+      - service: mqtt.publish
+        data:
+          topic: "voxwatch/announce"
+          payload: >
+            {"camera": "patio", "message": "Good morning. Today's forecast is sunny with a high of 75."}
+```
+
+#### Garage Door Open Warning
+
+```yaml
+automation:
+  - alias: "Warn when garage door opens"
+    trigger:
+      - platform: state
+        entity_id: cover.garage_door
+        to: "open"
+    action:
+      - service: mqtt.publish
+        data:
+          topic: "voxwatch/announce"
+          payload: >
+            {"camera": "garage", "message": "Garage door has been opened."}
+```
+
+#### Announce on All Cameras
+
+```yaml
+automation:
+  - alias: "Security alert on all cameras"
+    trigger:
+      - platform: state
+        entity_id: alarm_control_panel.home
+        to: "triggered"
+    action:
+      - service: mqtt.publish
+        data:
+          topic: "voxwatch/announce"
+          payload: '{"camera": "front_door", "message": "Security alarm triggered. Authorities notified.", "tone": "siren"}'
+      - service: mqtt.publish
+        data:
+          topic: "voxwatch/announce"
+          payload: '{"camera": "driveway", "message": "Security alarm triggered. Authorities notified.", "tone": "siren"}'
+      - service: mqtt.publish
+        data:
+          topic: "voxwatch/announce"
+          payload: '{"camera": "backyard", "message": "Security alarm triggered. Authorities notified.", "tone": "siren"}'
+```
+
+#### Template-Based Dynamic Messages
+
+```yaml
+automation:
+  - alias: "Announce weather when leaving"
+    trigger:
+      - platform: state
+        entity_id: person.jason
+        from: "home"
+    action:
+      - service: mqtt.publish
+        data:
+          topic: "voxwatch/announce"
+          payload: >
+            {"camera": "driveway",
+             "message": "Have a good day. Current temperature is {{ states('sensor.outdoor_temp') }} degrees."}
 ```
 
 ## Example Automations
