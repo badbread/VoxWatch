@@ -341,6 +341,17 @@ export function AiProviderStep({
         Continue
         <ArrowRight className="h-5 w-5" />
       </button>
+
+      {/* Set up later option */}
+      {provider !== 'none' && !canContinue && (
+        <button
+          type="button"
+          onClick={() => onNext('none', '', '', '')}
+          className="w-full text-center text-sm text-gray-500 hover:text-gray-300 transition-colors py-2"
+        >
+          Set up later — you can add an API key in the dashboard
+        </button>
+      )}
     </div>
   );
 }
