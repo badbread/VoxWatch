@@ -252,7 +252,9 @@ export function DiscoveryStep({
                     <BackchannelBadge hasBackchannel={info?.has_backchannel} />
                     {info?.codecs && info.codecs.length > 0 && (
                       <span className="text-[10px] text-gray-500 font-mono">
-                        {info.codecs.join(' · ')}
+                        {/* Show only the recommended codec, not the full list */}
+                        {info.codecs.find((c: string) => c.includes('PCMU') || c.includes('PCMA'))
+                          ?? info.codecs[0]}
                       </span>
                     )}
                   </div>
