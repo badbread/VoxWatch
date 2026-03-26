@@ -46,6 +46,13 @@ codebase changes.
 - Falls back to direct cloud synthesis (ElevenLabs, OpenAI, Cartesia)
 - Returns WAV bytes with X-Intro-Saved header
 
+### POST /api/audio/announce
+- Push a spoken announcement to a specific camera speaker
+- Request: camera (required), message (required, max 1000 chars), voice (optional), provider (optional), speed (optional), tone (optional)
+- Proxies to VoxWatch Preview API for TTS generation
+- Response: success, camera, duration_ms, error
+- Errors: 400 (missing camera/message, message exceeds 1000 chars)
+
 ### GET /api/cameras
 - List all cameras (config + Frigate + go2rtc merged)
 - Response: array of CameraStatus
@@ -306,6 +313,15 @@ gemini (video+images, auto-selects model in UI) -> openai (images) -> anthropic 
 ### MQTT Publishing Config Section (new -- Connections tab)
 
 Four fields exposed in UI: enabled, topic_prefix, include_ai_analysis, include_snapshot_url (maps to mqtt_publish.* config fields).
+
+### Email Camera Report Popup (CameraReportPrompt.tsx)
+
+| Field | Detail |
+|-------|--------|
+| Trigger | User clicks "Email Report" action on a camera |
+| Display | Modal dialog with To, Subject, and Body fields |
+| Copy buttons | Each field (To, Subject, Body) has a dedicated Copy button |
+| Previous behavior | Used mailto: links (replaced with modal + copy workflow) |
 
 ### Other UI Changes
 

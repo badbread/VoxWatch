@@ -239,7 +239,7 @@ Compatibility: Works with standard SIP phones, VoIP equipment
 **General Specifications:**
 - **Type:** Fixed bullet camera (outdoor, PoE)
 - **Audio Codec Support:** PCMA (G.711 A-law)
-- **Speaker:** NONE (RCA audio output only)
+- **Speaker:** RCA audio out only
 - **Microphone:** Built-in
 - **Audio Output:** RCA jack (analog audio out)
 - **RTSP Backchannel:** Advertised in SDP but no speaker hardware
