@@ -859,7 +859,7 @@ async def probe_services(req: ProbeRequest) -> ProbeResult:
                 continue  # already marked as no backchannel
             try:
                 # Extract camera IP from the go2rtc stream URL.
-                # Stream URLs look like: rtsp://user:pass@10.1.2.2:554/...
+                # Stream URLs look like: rtsp://user:pass@<camera-ip>:554/...
                 cam_ip = None
                 if go2rtc_reachable and g2rtc_module.go2rtc_client is not None:
                     try:
