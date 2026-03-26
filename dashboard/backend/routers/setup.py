@@ -792,20 +792,46 @@ async def probe_services(req: ProbeRequest) -> ProbeResult:
     # ── Cross-reference backchannel data with camera compatibility DB ──────
     # Some cameras advertise a backchannel in their SDP (because they have an
     # RCA audio output) even though they have no built-in speaker.  Our camera
-    # DB knows which models have this issue.  We try a quick ONVIF probe for
-    # each camera to identify the model, then override has_backchannel if the
-    # DB says the camera has no speaker.
+    # DB knows which models have this issue.
+    #
+    # During setup, we can't use the normal camera identification flow (it needs
+    # config.yaml to exist for go2rtc client initialization).  Instead, we
+    # extract each camera's IP from the go2rtc stream URL and do a direct ONVIF
+    # probe using raw aiohttp — no dependency on any initialized service client.
     try:
         from backend.camera_db import match_camera_model, SPEAKER_BUILTIN
-        from backend.routers.cameras import _resolve_camera_ip, _probe_onvif
+        from backend.routers.cameras import _probe_onvif
 
         for cam_name, bc_info in backchannel_info.items():
             if not bc_info.get("has_backchannel"):
                 continue  # already marked as no backchannel
             try:
-                cam_ip = await _resolve_camera_ip(cam_name)
+                # Extract camera IP from the go2rtc stream URL.
+                # Stream URLs look like: rtsp://user:pass@10.1.2.2:554/...
+                cam_ip = None
+                if go2rtc_reachable and g2rtc_module.go2rtc_client is not None:
+                    try:
+                        stream_info = await g2rtc_module.go2rtc_client.get_stream(cam_name)
+                        if stream_info:
+                            producers = stream_info.get("producers", [])
+                            for p in producers:
+                                url = p.get("url", "")
+                                if "://" in url and "@" in url:
+                                    # Parse IP from rtsp://user:pass@IP:port/path
+                                    from urllib.parse import urlparse
+                                    parsed = urlparse(url)
+                                    cam_ip = parsed.hostname
+                                    break
+                    except Exception:
+                        pass
+                else:
+                    # Fallback: try to get stream URL from the raw streams dict
+                    # that _probe_go2rtc already fetched
+                    pass
+
                 if not cam_ip:
                     continue
+
                 onvif_info = await _probe_onvif(cam_ip)
                 if not onvif_info:
                     continue

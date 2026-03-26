@@ -149,17 +149,11 @@ export function ReviewStep({ state }: ReviewStepProps) {
           value={`${state.go2rtcHost || state.frigateHost}:${state.go2rtcPort}`}
           status={state.probeResult?.go2rtc_reachable ? 'ok' : 'warn'}
         />
-        {/*
-          MQTT: show the user-entered host:port with a neutral (no status)
-          indicator. The probe result may be stale — the user may have changed
-          the MQTT host on the MQTT step after the initial probe. VoxWatch will
-          validate MQTT on first startup using whatever values are written here.
-        */}
         <ReviewRow
           icon={Radio}
           label="MQTT"
           value={`${state.mqttHost || state.frigateHost}:${state.mqttPort}`}
-          status="neutral"
+          status={state.probeResult?.mqtt_reachable ? 'ok' : 'neutral'}
         />
         <ReviewRow
           icon={Brain}
