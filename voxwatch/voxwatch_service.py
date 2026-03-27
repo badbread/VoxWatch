@@ -406,6 +406,9 @@ class VoxWatchService:
         # thread and needs this attribute to subscribe.
         self._mqtt_topic = topic
 
+        # Resolve publish config early — used for announce topic and LWT setup.
+        publish_cfg = self.config.get("mqtt_publish", {})
+
         # Announce topic — HA and external services can publish here to trigger
         # TTS announcements on camera speakers.
         announce_prefix = publish_cfg.get("topic_prefix", "voxwatch").rstrip("/")
@@ -436,7 +439,6 @@ class VoxWatchService:
 
         # Configure MQTT Last Will and Testament for online/offline status.
         # If VoxWatch disconnects unexpectedly, the broker publishes "offline".
-        publish_cfg = self.config.get("mqtt_publish", {})
         if publish_cfg.get("enabled", True):
             lwt_prefix = publish_cfg.get("topic_prefix", "voxwatch").rstrip("/")
             client.will_set(
