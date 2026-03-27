@@ -36,11 +36,12 @@
 import { useRef, useState, type ChangeEvent } from 'react';
 import {
   Info, Headphones, ChevronDown, ChevronUp, Radio,
-  Upload, Wand2, Trash2, CheckCircle2, AlertCircle, Loader2,
+  Upload, Wand2, Trash2, CheckCircle2, AlertCircle, Loader2, Volume2,
 } from 'lucide-react';
 import { useMutation } from '@tanstack/react-query';
 import { cn } from '@/utils/cn';
-import { generateIntroAudio, uploadIntroAudio } from '@/api/status';
+import { generateIntroAudio, uploadIntroAudio, previewAudio } from '@/api/status';
+import { AudioPreview } from '@/components/common/AudioPreview';
 import type { ResponseModeConfig, DispatchConfig, TtsConfig, ConfigValidationError } from '@/types/config';
 
 /** Maximum recommended character count for a custom response mode prompt. */
@@ -1724,6 +1725,55 @@ function LiveOperatorSettings({
 }
 
 
+/**
+ * Substitute persona template variables with user-configured values.
+ * Mirrors the backend _substitute_vars logic so "what you see is what you hear".
+ */
+function substitutePreviewVars(text: string, config: ResponseModeConfig): string {
+  let result = text;
+  // Guard dog names — format as natural Oxford-comma list
+  const dogNames = (config.guard_dog?.dog_names ?? []).filter((n): n is string => Boolean(n));
+  let dogStr = 'the dogs';
+  if (dogNames.length === 1) dogStr = dogNames[0]!;
+  else if (dogNames.length === 2) dogStr = `${dogNames[0]} and ${dogNames[1]}`;
+  else if (dogNames.length >= 3) dogStr = `${dogNames.slice(0, -1).join(', ')}, and ${dogNames[dogNames.length - 1]}`;
+  result = result.replaceAll('{dog_names}', dogStr);
+  result = result.replaceAll('{system_name}', config.system_name || 'Surveillance system');
+  result = result.replaceAll('{operator_name}', config.operator_name || 'the operator');
+  return result;
+}
+
+/**
+ * Get the best preview text for the current persona + customization state.
+ * Prioritises mood/preset-specific examples over the generic mode example.
+ */
+function getPreviewText(activeName: string, value: ResponseModeConfig): string | null {
+  const ALL = [...CORE_MODES, ...SITUATIONAL_MODES, ...FUN_MODES];
+  const modeDef = ALL.find((m) => m.id === activeName);
+
+  // Homeowner moods have their own example quotes
+  if (activeName === 'homeowner') {
+    const mood = value.mood ?? 'firm';
+    const moodDef = HOMEOWNER_MOODS.find((m) => m.id === mood);
+    if (moodDef) return substitutePreviewVars(moodDef.example.replace(/^"|"$/g, ''), value);
+  }
+
+  // Surveillance presets have their own example quotes
+  if (activeName === 'automated_surveillance') {
+    const preset = value.surveillance_preset ?? 'standard';
+    const presetDef = SURVEILLANCE_PRESETS.find((p) => p.id === preset);
+    if (presetDef?.example) return substitutePreviewVars(presetDef.example.replace(/^"|"$/g, ''), value);
+  }
+
+  // Fall back to the mode's generic example
+  if (modeDef?.example) {
+    return substitutePreviewVars(modeDef.example.replace(/^"|"$/g, ''), value);
+  }
+
+  return null;
+}
+
+
 export function PersonaConfigForm({ value, onChange, ttsConfig }: PersonaConfigFormProps) {
   /** Resolved mode name — fall back to "police_dispatch" if config has no value yet. */
   const activeName = value.name || 'police_dispatch';
@@ -1736,6 +1786,9 @@ export function PersonaConfigForm({ value, onChange, ttsConfig }: PersonaConfigF
   const [funExpanded, setFunExpanded] = useState(() =>
     FUN_MODES.some((m) => m.id === activeName),
   );
+
+  /** Audio preview mutation — same pattern as TtsConfigForm. */
+  const previewMutation = useMutation({ mutationFn: previewAudio });
 
   /** All modes combined for lookup. */
   const ALL_MODES = [...CORE_MODES, ...SITUATIONAL_MODES, ...FUN_MODES];
@@ -1928,6 +1981,68 @@ export function PersonaConfigForm({ value, onChange, ttsConfig }: PersonaConfigF
           <p className="mt-2 text-xs text-gray-400 dark:text-gray-600">
             Output varies based on what the camera sees.
           </p>
+        </div>
+      )}
+
+      {/* ── Audio preview ──────────────────────────────────────────────────── */}
+      {activeName !== 'custom' && ttsConfig && (
+        <div className="space-y-2">
+          {/* AudioPreview player — visible when audio is ready, loading, or errored */}
+          <AudioPreview
+            audioBlob={previewMutation.data?.blob ?? null}
+            isLoading={previewMutation.isPending}
+            error={previewMutation.isError ? (previewMutation.error as Error)?.message ?? 'Preview failed' : null}
+            generationTimeMs={previewMutation.data?.generationTimeMs}
+          />
+
+          {/* Preview Voice button — triggers TTS synthesis of the example text */}
+          {!previewMutation.isPending && (
+            <button
+              type="button"
+              onClick={() => {
+                const text = getPreviewText(activeName, value);
+                if (!text || !ttsConfig) return;
+                const engine = ttsConfig.engine ?? 'kokoro';
+                let voice = 'af_heart';
+                let speed = 1.0;
+                if (engine === 'kokoro') {
+                  voice = ttsConfig.kokoro_voice ?? 'af_heart';
+                  speed = ttsConfig.kokoro_speed ?? 1.0;
+                } else if (engine === 'piper') {
+                  voice = ttsConfig.piper_model ?? 'en_US-lessac-medium';
+                  speed = ttsConfig.voice_speed ?? 1.0;
+                } else if (engine === 'espeak') {
+                  voice = 'espeak';
+                  speed = (ttsConfig.espeak_speed ?? 175) / 175;
+                } else if (engine === 'elevenlabs') {
+                  voice = ttsConfig.elevenlabs_voice_id ?? 'pNInz6obpgDQGcFmaJgB';
+                } else if (engine === 'openai') {
+                  voice = ttsConfig.openai_voice ?? 'onyx';
+                  speed = ttsConfig.openai_speed ?? 1.0;
+                } else if (engine === 'cartesia') {
+                  voice = ttsConfig.cartesia_voice_id ?? '';
+                  speed = ttsConfig.cartesia_speed ?? 1.0;
+                }
+                previewMutation.mutate({
+                  persona: activeName,
+                  message: text,
+                  voice,
+                  provider: engine,
+                  speed,
+                });
+              }}
+              className={cn(
+                'flex w-full items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-all',
+                'active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-blue-500',
+                previewMutation.isSuccess
+                  ? 'border border-green-400 bg-green-50 text-green-700 hover:bg-green-100 dark:border-green-700/60 dark:bg-green-950/20 dark:text-green-300 dark:hover:bg-green-950/30'
+                  : 'border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700',
+              )}
+            >
+              <Volume2 className="h-4 w-4" />
+              {previewMutation.isSuccess ? 'Preview Again' : 'Preview Voice'}
+            </button>
+          )}
         </div>
       )}
 
