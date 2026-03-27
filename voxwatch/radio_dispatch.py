@@ -547,15 +547,16 @@ async def _generate_system_voice_tts(
     audio_pipeline: object,
     config: dict,
 ) -> bool:
-    """Generate TTS with a distinct 'system/automated' voice for the intro.
+    """Generate TTS with piper for the 'connecting to channel' intro.
 
-    Uses Kokoro with a calm, neutral voice (af_nova or af_sky) that sounds
-    like a modern security panel or automated phone system — distinct from
-    the dispatcher's voice but still natural-sounding.  Falls back to the
-    main TTS pipeline if Kokoro override fails.
+    The channel intro ("Connecting to dispatch frequency...") is a system
+    announcement, not a human voice on the radio.  Piper's robotic tone
+    sells the illusion of an automated security panel before the scanner
+    audio kicks in.  Falls back to the standard TTS pipeline if piper is
+    unavailable.
 
     Args:
-        text: Text to synthesize.
+        text: Text to synthesize (e.g. "Connecting to County Sheriff dispatch frequency...").
         output_path: Where to write the WAV file.
         audio_pipeline: The AudioPipeline instance with generate_tts().
         config: VoxWatch config dict.
@@ -563,43 +564,34 @@ async def _generate_system_voice_tts(
     Returns:
         True if generation succeeded.
     """
-    import aiohttp
+    # Use piper for the robotic system voice — it sounds like an
+    # automated panel, not a human, which is exactly what we want.
+    try:
+        piper_cfg = config.get("tts", {})
+        piper_host = piper_cfg.get("piper_host", "").strip()
+        if not piper_host:
+            # Piper runs as a sidecar in Docker — try the default URL.
+            piper_host = "http://piper:5000"
 
-    # Try Kokoro with a different voice than the dispatcher
-    tts_cfg = config.get("tts", {})
-    kokoro_host = tts_cfg.get("kokoro_host", "").strip()
+        import aiohttp
+        async with aiohttp.ClientSession() as session, session.post(
+            f"{piper_host}/api/tts",
+            params={"text": text},
+            timeout=aiohttp.ClientTimeout(total=10),
+        ) as resp:
+            if resp.status == 200:
+                data = await resp.read()
+                with open(output_path, "wb") as f:
+                    f.write(data)
+                if os.path.exists(output_path):
+                    logger.debug(
+                        "System voice TTS via piper: %d bytes", len(data),
+                    )
+                    return True
+    except Exception as exc:
+        logger.debug("Piper system voice failed: %s — falling back", exc)
 
-    if kokoro_host and tts_cfg.get("engine") == "kokoro":
-        # Use a calm neutral voice — different from the dispatcher voice
-        # af_nova: clean, professional female (like a phone system)
-        # af_sky: soft, calm female (like a smart home assistant)
-        system_voice = "af_nova"
-        dispatcher_voice = tts_cfg.get("kokoro_voice", "af_heart")
-
-        # Don't use the same voice as the dispatcher
-        if system_voice == dispatcher_voice:
-            system_voice = "af_sky"
-
-        try:
-            async with aiohttp.ClientSession() as session, session.post(
-                f"{kokoro_host}/tts",
-                json={"text": text, "voice": system_voice, "speed": 0.95},
-                timeout=aiohttp.ClientTimeout(total=10),
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.read()
-                    with open(output_path, "wb") as f:
-                        f.write(data)
-                    if os.path.exists(output_path):
-                        logger.debug(
-                            "System voice TTS via Kokoro (%s): %d bytes",
-                            system_voice, len(data),
-                        )
-                        return True
-        except Exception as exc:
-            logger.debug("Kokoro system voice failed: %s — falling back", exc)
-
-    # Fallback: use the standard TTS pipeline
+    # Fallback: use the standard TTS pipeline (whatever is configured).
     try:
         return await audio_pipeline.generate_tts(text, output_path)
     except Exception:
@@ -1700,17 +1692,15 @@ async def _generate_chatter_tts(
     audio_pipeline,
     config: dict,
 ) -> bool:
-    """Generate TTS for a random chatter snippet using an alternate voice.
+    """Generate TTS for a random chatter snippet using the dispatcher voice.
 
-    Attempts to use the configured officer voice (``dispatch.officer_voice``
-    from config, defaulting to ``_OFFICER_DEFAULT_VOICE``) via the Kokoro TTS
-    provider so the chatter sounds like a different person than the main
-    dispatcher voice.  Falls back to the standard ``generate_tts()`` call if
-    the Kokoro-specific path is unavailable.
+    The chatter is background radio traffic heard before the main dispatch
+    call begins.  It should use the **same dispatcher voice** so it sounds
+    like the same channel / same person handling multiple calls — which is
+    how real dispatch radio works.
 
-    Using a different voice matters for the channel intro illusion: the
-    "other call" you hear before the main dispatch should sound like a
-    distinct unit on the channel, not the same dispatcher speaking.
+    The officer voice is reserved exclusively for the officer acknowledgment
+    segment at the end of the dispatch sequence.
 
     Args:
         text: Normalised chatter text to synthesise (10-codes already expanded).
@@ -1721,37 +1711,13 @@ async def _generate_chatter_tts(
     Returns:
         True if TTS was generated successfully, False otherwise.
     """
-    # Determine the alternate officer voice to use for chatter.
-    dispatch_cfg: dict = (
-        config.get("response_mode", config.get("persona", {})).get("dispatch", {})
-    )
-    officer_voice: str = dispatch_cfg.get("officer_voice", _OFFICER_DEFAULT_VOICE)
-
-    # Attempt Kokoro-specific voice override first.
-    tts_cfg: dict = config.get("tts", {})
-    if tts_cfg.get("provider") == "kokoro" and hasattr(audio_pipeline, "generate_tts"):
-        # Build a shallow config copy with the officer voice substituted so
-        # generate_tts() uses it without permanently mutating the live config.
-        import copy as _copy
-        chatter_config = _copy.deepcopy(config)
-        chatter_config.setdefault("tts", {}).setdefault("kokoro", {})["voice"] = officer_voice
-        try:
-            ok = await audio_pipeline.generate_tts(text, output_path, config_override=chatter_config)
-            if ok:
-                return True
-        except TypeError:
-            # generate_tts() does not accept config_override — fall through to default.
-            pass
-        except Exception as exc:
-            logger.debug(
-                "radio_dispatch: officer-voice TTS attempt failed: %s — falling back", exc
-            )
-
-    # Fall back to the pipeline's default generate_tts() (uses main dispatcher voice).
+    # Use the dispatcher voice for chatter — same voice as the main dispatch
+    # segments.  This is just the standard TTS pipeline voice which is already
+    # configured as the dispatcher voice.
     try:
         return await audio_pipeline.generate_tts(text, output_path)
     except Exception as exc:
-        logger.debug("radio_dispatch: chatter TTS fallback failed: %s", exc)
+        logger.debug("radio_dispatch: chatter TTS failed: %s", exc)
         return False
 
 
