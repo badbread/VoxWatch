@@ -33,7 +33,7 @@
  *   - Custom prompt textarea + guidance info box when custom is selected.
  */
 
-import { useRef, useState, type ChangeEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import {
   Info, Headphones, ChevronDown, ChevronUp, Radio,
   Upload, Wand2, Trash2, CheckCircle2, AlertCircle, Loader2, Volume2,
@@ -1869,6 +1869,13 @@ export function PersonaConfigForm({ value, onChange, ttsConfig }: PersonaConfigF
 
   /** Audio preview mutation — same pattern as TtsConfigForm. */
   const previewMutation = useMutation({ mutationFn: previewAudio });
+
+  // Reset preview state when switching between personas so stale audio /
+  // error messages from one persona don't bleed into another.
+  useEffect(() => {
+    previewMutation.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeName]);
 
   // ── Voice override helpers ─────────────────────────────────────────────────
   // Computed once per render; used by both the voice selector panel and the

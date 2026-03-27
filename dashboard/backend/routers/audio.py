@@ -1187,16 +1187,14 @@ async def preview_audio(request: PreviewRequest) -> StreamingResponse:
     used_fallback = False
 
     # ── Proxy to VoxWatch Preview API when needed ────────────────────────────
-    # Dispatch previews require the full VoxWatch pipeline (channel intro,
-    # random chatter, multi-segment TTS, radio effects, officer response).
-    # Piper previews also proxy because Piper is only installed in the
-    # VoxWatch container, not the dashboard container.
-    # We fall back transparently to local synthesis if VoxWatch is unreachable.
-    _proxy_providers = {"piper"}
-    _should_proxy = (
-        request.persona in _DISPATCH_MODES
-        or request.provider.lower() in _proxy_providers
-    )
+    # ALL preview requests proxy to the VoxWatch service first.  The
+    # dashboard container has no TTS binaries (no espeak, piper, ffmpeg) —
+    # only the VoxWatch container has the full AudioPipeline.  Cloud-only
+    # providers (ElevenLabs, OpenAI, Cartesia) could technically run here
+    # but routing everything through one path keeps voice resolution and
+    # fallback behavior consistent.  If VoxWatch is unreachable, we fall
+    # through to local cloud-only synthesis as a last resort.
+    _should_proxy = True
     if _should_proxy:
         t_proxy_start = time.monotonic()
         wav_bytes = await _proxy_dispatch_preview(request)
