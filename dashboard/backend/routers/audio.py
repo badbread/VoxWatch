@@ -1615,8 +1615,10 @@ async def test_tts_provider(request: TestTtsProviderRequest) -> TestTtsProviderR
     provider = request.provider.lower()
 
     # Resolve the API key: prefer the explicit field, then fall back to config.
+    # If the frontend sends a masked placeholder (e.g. "***MASKED***"), ignore
+    # it and resolve from the raw config instead.
     api_key = request.api_key
-    if not api_key:
+    if not api_key or api_key.startswith("***"):
         key_name_map = {
             "elevenlabs": "elevenlabs_api_key",
             "openai": "openai_api_key",
