@@ -1029,20 +1029,21 @@ async def _get_voxwatch_preview_url() -> str:
     return f"http://{host}:{port}/api/preview"
 
 
-async def _proxy_dispatch_preview(request: "PreviewRequest") -> Optional[bytes]:
-    """Proxy a dispatch preview request to the VoxWatch Preview API.
+async def _proxy_dispatch_preview(
+    request: "PreviewRequest",
+) -> Optional[tuple[bytes, dict[str, str]]]:
+    """Proxy a preview request to the VoxWatch Preview API.
 
     Forwards the preview request body to the VoxWatch service on port 8892 and
-    returns the raw WAV bytes.  If the VoxWatch service is unreachable (not
-    running, wrong host/port) ``None`` is returned so the caller can fall back
-    to local synthesis.
+    returns the raw WAV bytes along with provider tracking headers from the
+    VoxWatch response.
 
     Args:
         request: The dashboard ``PreviewRequest`` model populated by the browser.
 
     Returns:
-        Raw WAV bytes from the VoxWatch Preview API, or ``None`` if the request
-        could not be completed (service unreachable, timeout, non-200 response).
+        Tuple of (wav_bytes, headers_dict) from the VoxWatch Preview API, or
+        ``None`` if the request could not be completed.
     """
     url = await _get_voxwatch_preview_url()
 
@@ -1056,9 +1057,10 @@ async def _proxy_dispatch_preview(request: "PreviewRequest") -> Optional[bytes]:
         payload["message"] = request.message
 
     logger.debug(
-        "Proxying dispatch preview to VoxWatch Preview API: %s mode=%s",
+        "Proxying preview to VoxWatch Preview API: %s mode=%s provider=%s",
         url,
         request.persona,
+        request.provider,
     )
 
     try:
@@ -1071,19 +1073,28 @@ async def _proxy_dispatch_preview(request: "PreviewRequest") -> Optional[bytes]:
                 if resp.status != 200:
                     body_text = await resp.text()
                     logger.warning(
-                        "VoxWatch Preview API returned HTTP %d for dispatch preview: %s",
+                        "VoxWatch Preview API returned HTTP %d for preview: %s",
                         resp.status,
                         body_text[:200],
                     )
                     return None
 
-                elapsed_ms = resp.headers.get("X-Generation-Time-Ms", "?")
+                # Forward provider tracking headers from VoxWatch.
+                proxy_headers = {
+                    "X-Generation-Time-Ms": resp.headers.get("X-Generation-Time-Ms", "0"),
+                    "X-TTS-Provider": resp.headers.get("X-TTS-Provider", request.provider),
+                    "X-TTS-Configured": resp.headers.get("X-TTS-Configured", request.provider),
+                    "X-TTS-Fallback": resp.headers.get("X-TTS-Fallback", "false"),
+                }
+                elapsed_ms = proxy_headers["X-Generation-Time-Ms"]
                 logger.info(
-                    "Dispatch preview received from VoxWatch: %s ms, mode=%s",
+                    "Preview received from VoxWatch: %s ms, mode=%s provider=%s",
                     elapsed_ms,
                     request.persona,
+                    proxy_headers["X-TTS-Provider"],
                 )
-                return await resp.read()
+                wav_bytes = await resp.read()
+                return (wav_bytes, proxy_headers)
 
     except aiohttp.ClientConnectorError as exc:
         logger.info(
@@ -1197,12 +1208,15 @@ async def preview_audio(request: PreviewRequest) -> StreamingResponse:
     _should_proxy = True
     if _should_proxy:
         t_proxy_start = time.monotonic()
-        wav_bytes = await _proxy_dispatch_preview(request)
-        if wav_bytes is not None:
+        proxy_result = await _proxy_dispatch_preview(request)
+        if proxy_result is not None:
+            wav_bytes, proxy_headers = proxy_result
             elapsed_ms = int((time.monotonic() - t_proxy_start) * 1000)
             logger.info(
-                "Dispatch preview proxied from VoxWatch: persona=%s elapsed_ms=%d bytes=%d",
+                "Preview proxied from VoxWatch: persona=%s provider=%s fallback=%s elapsed_ms=%d bytes=%d",
                 request.persona,
+                proxy_headers.get("X-TTS-Provider", "?"),
+                proxy_headers.get("X-TTS-Fallback", "false"),
                 elapsed_ms,
                 len(wav_bytes),
             )
@@ -1211,9 +1225,9 @@ async def preview_audio(request: PreviewRequest) -> StreamingResponse:
                 media_type="audio/wav",
                 headers={
                     "X-Generation-Time": str(elapsed_ms),
-                    "X-TTS-Provider": configured_provider,
-                    "X-TTS-Configured": configured_provider,
-                    "X-TTS-Fallback": "false",
+                    "X-TTS-Provider": proxy_headers.get("X-TTS-Provider", configured_provider),
+                    "X-TTS-Configured": proxy_headers.get("X-TTS-Configured", configured_provider),
+                    "X-TTS-Fallback": proxy_headers.get("X-TTS-Fallback", "false"),
                     "Cache-Control": "no-store",
                 },
             )

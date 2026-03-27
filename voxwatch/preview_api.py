@@ -267,6 +267,21 @@ class PreviewAPI:
 
         elapsed_ms = int((time.monotonic() - start_ts) * 1000)
 
+        # Determine which provider was actually used — may differ from what
+        # was requested if the pipeline fell back (e.g. ElevenLabs → espeak).
+        actual_provider = preview_config.get("tts", {}).get("provider", "piper")
+        configured_provider = tts_override.get("provider", actual_provider)
+        used_fallback = "false"
+
+        # Check if the pipeline silently switched providers during generation.
+        if hasattr(self._audio, "_tts_provider") and self._audio._tts_provider:
+            actual_provider = getattr(
+                self._audio._tts_provider, "name", actual_provider
+            )
+        # If the actual provider differs from what was configured, flag it.
+        if actual_provider != configured_provider:
+            used_fallback = "true"
+
         try:
             with open(wav_path, "rb") as fh:
                 wav_bytes = fh.read()
@@ -282,8 +297,9 @@ class PreviewAPI:
                 os.unlink(wav_path)
 
         logger.info(
-            "Preview generated: mode=%s elapsed_ms=%d bytes=%d",
+            "Preview generated: mode=%s provider=%s elapsed_ms=%d bytes=%d",
             response_mode,
+            actual_provider,
             elapsed_ms,
             len(wav_bytes),
         )
@@ -291,7 +307,12 @@ class PreviewAPI:
         return web.Response(
             body=wav_bytes,
             content_type="audio/wav",
-            headers={"X-Generation-Time-Ms": str(elapsed_ms)},
+            headers={
+                "X-Generation-Time-Ms": str(elapsed_ms),
+                "X-TTS-Provider": actual_provider,
+                "X-TTS-Configured": configured_provider,
+                "X-TTS-Fallback": used_fallback,
+            },
         )
 
     async def _handle_generate_intro(self, request: web.Request) -> web.Response:
