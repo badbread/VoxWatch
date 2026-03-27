@@ -459,6 +459,33 @@ class MessagesConfig(BaseModel):
 # ── Persona / Response Mode Section ──────────────────────────────────────────
 
 
+class ModeVoiceOverride(BaseModel):
+    """Per-provider voice override for a specific persona.
+
+    Used in ``PersonaConfig.voice_overrides`` to let users swap the TTS voice
+    for an individual mode without touching the global TTS provider config.
+    Keys are provider-specific voice identifiers; ``None`` means "use the
+    mode's built-in default" for that provider.
+    """
+
+    kokoro_voice: Optional[str] = Field(
+        default=None,
+        description="Kokoro voice ID override for this persona (e.g. 'af_bella').",
+    )
+    openai_voice: Optional[str] = Field(
+        default=None,
+        description="OpenAI TTS voice override for this persona (e.g. 'nova', 'onyx').",
+    )
+    elevenlabs_voice: Optional[str] = Field(
+        default=None,
+        description="ElevenLabs voice ID override for this persona.",
+    )
+    piper_model: Optional[str] = Field(
+        default=None,
+        description="Piper model override for this persona (e.g. 'en_US-lessac-medium').",
+    )
+
+
 class DispatchConfig(BaseModel):
     """Dispatch-specific customization fields for the police_dispatch response mode.
 
@@ -674,6 +701,14 @@ class PersonaConfig(BaseModel):
     guard_dog: GuardDogConfig = Field(
         default_factory=GuardDogConfig,
         description="Guard dog persona customization (dog names).",
+    )
+    voice_overrides: Optional[Dict[str, ModeVoiceOverride]] = Field(
+        default=None,
+        description=(
+            "Per-persona voice overrides. Keys are mode IDs (e.g. 'mafioso'), "
+            "values are partial voice configs that replace the persona's built-in "
+            "voice defaults. Only non-null fields within each override are applied."
+        ),
     )
 
 

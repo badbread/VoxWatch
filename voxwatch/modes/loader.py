@@ -372,6 +372,7 @@ _BUILTIN_MODES: list[ResponseMode] = [
             scene_context_prefix=True,
         ),
         tone=ToneConfig(mood="authoritative", speed_multiplier=0.9, radio_effect=True),
+        voice=VoiceConfig(kokoro_voice="af_bella", openai_voice="nova", elevenlabs_voice="46zEzba8Y8yQ0bVcv5O9"),
         stages={
             "stage1": _stage(
                 prompt_modifier=(
@@ -453,6 +454,7 @@ _BUILTIN_MODES: list[ResponseMode] = [
         ),
         effect="Makes the subject feel personally watched by a real human",
         tone=ToneConfig(mood="watchful", speed_multiplier=1.0),
+        voice=VoiceConfig(kokoro_voice="am_michael", openai_voice="onyx", elevenlabs_voice="ErXwobaYiN019PkySvjV"),
         stages={
             "stage1": _stage(
                 prompt_modifier="",
@@ -504,6 +506,7 @@ _BUILTIN_MODES: list[ResponseMode] = [
         ),
         effect="Projects professional authority — implies staffed monitoring",
         tone=ToneConfig(mood="authoritative", speed_multiplier=0.95),
+        voice=VoiceConfig(kokoro_voice="am_fenrir", openai_voice="echo", elevenlabs_voice="pNInz6obpgDQGcFmaJgB"),
         stages={
             "stage1": _stage(
                 prompt_modifier="",
@@ -557,6 +560,7 @@ _BUILTIN_MODES: list[ResponseMode] = [
         ),
         effect="Personal and direct — sounds like you're home and watching",
         tone=ToneConfig(mood="firm", speed_multiplier=1.0),
+        voice=VoiceConfig(kokoro_voice="af_heart", openai_voice="nova"),
         stages={
             "stage1": _stage(
                 prompt_modifier="",
@@ -605,6 +609,7 @@ _BUILTIN_MODES: list[ResponseMode] = [
         ),
         effect="The chill of a system that records everything without judgment",
         tone=ToneConfig(mood="cold", speed_multiplier=0.9),
+        voice=VoiceConfig(kokoro_voice="af_kore", openai_voice="alloy"),
         stages={
             "stage1": _stage(
                 prompt_modifier="",
@@ -660,6 +665,7 @@ _BUILTIN_MODES: list[ResponseMode] = [
         ),
         effect="Unsettling certainty — they know you know",
         tone=ToneConfig(mood="menacing", speed_multiplier=0.85),
+        voice=VoiceConfig(kokoro_voice="am_onyx", openai_voice="onyx"),
         stages={
             "stage1": _stage(
                 prompt_modifier="",
@@ -711,6 +717,7 @@ _BUILTIN_MODES: list[ResponseMode] = [
         ),
         effect="The whole street is watching — public accountability pressure",
         tone=ToneConfig(mood="communal", speed_multiplier=1.0),
+        voice=VoiceConfig(kokoro_voice="af_sarah", openai_voice="shimmer"),
         stages={
             "stage1": _stage(
                 prompt_modifier="",
@@ -765,6 +772,7 @@ _BUILTIN_MODES: list[ResponseMode] = [
         ),
         effect="Indirect deterrence through implied canine threat",
         tone=ToneConfig(mood="menacing", speed_multiplier=0.95),
+        voice=VoiceConfig(kokoro_voice="am_adam", openai_voice="onyx"),
         stages={
             "stage1": _stage(
                 prompt_modifier="",
@@ -820,6 +828,7 @@ _BUILTIN_MODES: list[ResponseMode] = [
         ),
         effect="Cold AI certainty — implies biometric logging and analysis",
         tone=ToneConfig(mood="clinical", speed_multiplier=0.9),
+        voice=VoiceConfig(kokoro_voice="af_kore", openai_voice="nova"),
         stages={
             "stage1": _stage(
                 prompt_modifier="",
@@ -877,6 +886,7 @@ _BUILTIN_MODES: list[ResponseMode] = [
         ),
         effect="Theatrical mob-boss energy with genuine menace underneath",
         tone=ToneConfig(mood="theatrical", speed_multiplier=1.0),
+        voice=VoiceConfig(kokoro_voice="am_fenrir", openai_voice="onyx"),
         stages={
             "stage1": _stage(
                 prompt_modifier="",
@@ -926,6 +936,7 @@ _BUILTIN_MODES: list[ResponseMode] = [
         ),
         effect="Shame and embarrassment — harder to shake than a direct threat",
         tone=ToneConfig(mood="disappointed", speed_multiplier=1.05),
+        voice=VoiceConfig(kokoro_voice="af_nicole", openai_voice="nova"),
         stages={
             "stage1": _stage(
                 prompt_modifier="",
@@ -975,6 +986,7 @@ _BUILTIN_MODES: list[ResponseMode] = [
         ),
         effect="Theatrical enough to be memorable — they'll tell their friends",
         tone=ToneConfig(mood="theatrical", speed_multiplier=1.1),
+        voice=VoiceConfig(kokoro_voice="am_adam", openai_voice="fable"),
         stages={
             "stage1": _stage(
                 prompt_modifier="",
@@ -1025,6 +1037,7 @@ _BUILTIN_MODES: list[ResponseMode] = [
         ),
         effect="Over-the-top theatrical menace — unforgettable deterrent",
         tone=ToneConfig(mood="theatrical", speed_multiplier=1.1),
+        voice=VoiceConfig(kokoro_voice="am_fenrir", openai_voice="echo"),
         stages={
             "stage1": _stage(
                 prompt_modifier="",
@@ -1521,6 +1534,32 @@ def get_active_mode(
     # formatted name string from response_mode.guard_dog.dog_names.
     if mode_id == "guard_dog":
         mode = _apply_guard_dog_names(mode, config)
+
+    # ── Apply user voice overrides from config ─────────────────────────────
+    # ``response_mode.voice_overrides`` is a dict keyed by mode ID.  When a
+    # matching entry is present, non-None provider fields are merged on top of
+    # the mode's built-in VoiceConfig defaults, leaving unset fields untouched.
+    voice_overrides = config.get("response_mode", {}).get("voice_overrides", {})
+    if isinstance(voice_overrides, dict) and mode_id in voice_overrides:
+        user_voice = voice_overrides[mode_id]
+        if isinstance(user_voice, dict):
+            merged_voice = VoiceConfig(
+                kokoro_voice=user_voice.get("kokoro_voice") or mode.voice.kokoro_voice,
+                openai_voice=user_voice.get("openai_voice") or mode.voice.openai_voice,
+                elevenlabs_voice=user_voice.get("elevenlabs_voice") or mode.voice.elevenlabs_voice,
+                piper_model=user_voice.get("piper_model") or mode.voice.piper_model,
+            )
+            mode = ResponseMode(
+                id=mode.id,
+                name=mode.name,
+                category=mode.category,
+                description=mode.description,
+                effect=mode.effect,
+                tone=mode.tone,
+                voice=merged_voice,
+                behavior=mode.behavior,
+                stages=mode.stages,
+            )
 
     return mode
 

@@ -470,6 +470,8 @@ export interface ResponseModeConfig {
     /** Dog names (0-3). Empty array = generic "the dogs". */
     dog_names?: string[];
   };
+  /** Per-persona voice overrides. Keys are mode IDs. */
+  voice_overrides?: Record<string, ModeVoiceConfig>;
 }
 
 /**

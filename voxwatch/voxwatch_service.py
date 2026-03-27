@@ -76,6 +76,7 @@ from voxwatch.modes import (
 from voxwatch.modes import (
     get_active_mode as get_active_mode_obj,
 )
+from voxwatch.modes.mode import VoiceConfig
 from voxwatch.radio_dispatch import (
     DISPATCH_MODES,
     compose_dispatch_audio,
@@ -908,7 +909,7 @@ class VoxWatchService:
 
         if initial_enabled:
             initial_push_ok = await self._play_initial_response(
-                camera_stream, mode_name,
+                camera_stream, mode_name, _active_mode_obj.voice,
             )
             _initial_audio_success = initial_push_ok
             record_audio_push(self._camera_stats, camera_name, initial_push_ok)
@@ -941,7 +942,8 @@ class VoxWatchService:
             _escalation_description = ai_description
 
             s_esc_description, s_esc_push_ok = await self._run_escalation(
-                event_id, camera_name, camera_stream, mode_name, ai_description
+                event_id, camera_name, camera_stream, mode_name, ai_description,
+                _active_mode_obj.voice,
             )
             # Use the more detailed description if the escalation stage got one
             if s_esc_description:
@@ -1028,6 +1030,7 @@ class VoxWatchService:
         self,
         camera_stream: str,
         mode_name: str,
+        voice_config: "VoiceConfig | None" = None,
     ) -> bool:
         """Play the mode's instant Initial Response message (0 s delay, 1 sentence).
 
@@ -1049,6 +1052,8 @@ class VoxWatchService:
         Args:
             camera_stream: go2rtc stream name for the target camera.
             mode_name: Active response mode name (e.g. ``"private_security"``).
+            voice_config: Optional per-persona voice overrides forwarded from
+                the active ResponseMode.
 
         Returns:
             True if the audio push succeeded, False otherwise.
@@ -1084,7 +1089,7 @@ class VoxWatchService:
             "Initial Response [%s]: '%s'", mode_name, initial_text
         )
         return await self._audio.generate_and_push(
-            camera_stream, initial_text, "stage2"
+            camera_stream, initial_text, "stage2", voice_config
         )
 
     async def _run_escalation(
@@ -1094,6 +1099,7 @@ class VoxWatchService:
         camera_stream: str,
         mode_name: str,
         ai_description: str | None,
+        voice_config: "VoiceConfig | None" = None,
     ) -> tuple[str | None, bool]:
         """Run the Escalation stage if the person is still present.
 
@@ -1115,6 +1121,9 @@ class VoxWatchService:
             ai_description: AI-generated description string from ``_stage2_ai_prep``,
                 or None if the AI call failed.  For dispatch modes this should be
                 a JSON string; for other modes it is a plain sentence.
+            voice_config: Optional per-persona voice overrides forwarded from
+                the active ResponseMode.  Passed through to every TTS call so
+                the correct voice is used for each persona.
 
         Returns:
             A 2-tuple of (description_used, push_success).
@@ -1221,7 +1230,7 @@ class VoxWatchService:
             )
             try:
                 cadence_ok = await self._audio.generate_natural_tts(
-                    full_phrases, cadence_path
+                    full_phrases, cadence_path, voice_config
                 )
                 if cadence_ok:
                     conv_ok = await self._audio.convert_audio(cadence_path, converted_path)
@@ -1252,7 +1261,7 @@ class VoxWatchService:
 
         # Flat-string fallback (natural cadence disabled, no phrases, or error).
         push_ok = await self._audio.generate_and_push(
-            camera_stream, escalation_message, "stage3"
+            camera_stream, escalation_message, "stage3", voice_config
         )
         return ai_description, push_ok
 

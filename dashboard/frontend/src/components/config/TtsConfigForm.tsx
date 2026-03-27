@@ -23,12 +23,15 @@ import {
   Zap,
   Cpu,
   Globe,
+  CheckCircle2,
+  AlertCircle,
+  Loader2,
 } from 'lucide-react';
 import { useMutation } from '@tanstack/react-query';
 import { errorForField } from '@/utils/validators';
 import { inputCls, Field } from '@/components/common/FormField';
 import { cn } from '@/utils/cn';
-import { previewAudio } from '@/api/status';
+import { previewAudio, testTtsProvider } from '@/api/status';
 import { AudioPreview } from '@/components/common/AudioPreview';
 
 /** Context for sharing the active persona name with sub-components. */
@@ -528,6 +531,101 @@ function TestVoiceButton({
 }
 
 // ---------------------------------------------------------------------------
+// Test API Access button — cloud providers only
+// ---------------------------------------------------------------------------
+
+/**
+ * "Test API Access" button for cloud TTS providers.
+ *
+ * Calls POST /api/audio/test-tts-provider with the given provider + key
+ * and shows green success or red error feedback inline.
+ */
+function TestApiAccessButton({
+  provider,
+  apiKey,
+  voiceId,
+}: {
+  /** TTS provider identifier (e.g. "elevenlabs", "openai", "cartesia", "polly"). */
+  provider: string;
+  /** API key to test.  Button is disabled when empty. */
+  apiKey?: string;
+  /** Optional voice ID to include in the test. */
+  voiceId?: string;
+}) {
+  const testMutation = useMutation({ mutationFn: testTtsProvider });
+
+  const handleTest = () => {
+    testMutation.mutate({
+      provider,
+      ...(apiKey ? { api_key: apiKey } : {}),
+      ...(voiceId ? { voice_id: voiceId } : {}),
+    });
+  };
+
+  return (
+    <div className="sm:col-span-2 space-y-2">
+      {!testMutation.isPending && (
+        <button
+          type="button"
+          onClick={handleTest}
+          disabled={!apiKey}
+          className={cn(
+            'flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium transition-all',
+            'focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50',
+            testMutation.isSuccess && testMutation.data?.ok
+              ? 'border border-green-400 bg-green-50 text-green-700 hover:bg-green-100 dark:border-green-700/60 dark:bg-green-950/20 dark:text-green-300'
+              : testMutation.isSuccess && !testMutation.data?.ok
+                ? 'border border-red-400 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-700/60 dark:bg-red-950/20 dark:text-red-300'
+                : 'border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-400',
+          )}
+        >
+          {testMutation.isSuccess && testMutation.data?.ok ? (
+            <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+          ) : testMutation.isSuccess && !testMutation.data?.ok ? (
+            <AlertCircle className="h-3.5 w-3.5" aria-hidden="true" />
+          ) : (
+            <FlaskConical className="h-3.5 w-3.5" aria-hidden="true" />
+          )}
+          {testMutation.isSuccess
+            ? testMutation.data?.ok
+              ? 'API Access OK'
+              : 'Access Failed'
+            : 'Test API Access'}
+        </button>
+      )}
+
+      {testMutation.isPending && (
+        <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+          Testing API access...
+        </div>
+      )}
+
+      {testMutation.isSuccess && (
+        <p
+          className={cn(
+            'text-xs',
+            testMutation.data?.ok
+              ? 'text-green-600 dark:text-green-400'
+              : 'text-red-600 dark:text-red-400',
+          )}
+          aria-live="polite"
+        >
+          {testMutation.data?.message}
+          {testMutation.data?.latency_ms ? ` (${testMutation.data.latency_ms}ms)` : ''}
+        </p>
+      )}
+
+      {testMutation.isError && (
+        <p className="text-xs text-red-600 dark:text-red-400" aria-live="polite">
+          {(testMutation.error as Error)?.message ?? 'Test failed.'}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Provider-specific field sections
 // ---------------------------------------------------------------------------
 
@@ -855,6 +953,12 @@ function ElevenLabsFields({
         }}
         disabled={!value.elevenlabs_api_key || !value.elevenlabs_voice_id}
       />
+
+      <TestApiAccessButton
+        provider="elevenlabs"
+        {...(value.elevenlabs_api_key ? { apiKey: value.elevenlabs_api_key } : {})}
+        {...(value.elevenlabs_voice_id ? { voiceId: value.elevenlabs_voice_id } : {})}
+      />
     </div>
   );
 }
@@ -925,6 +1029,12 @@ function CartesiaFields({
         }}
         disabled={!value.cartesia_api_key || !value.cartesia_voice_id}
       />
+
+      <TestApiAccessButton
+        provider="cartesia"
+        {...(value.cartesia_api_key ? { apiKey: value.cartesia_api_key } : {})}
+        {...(value.cartesia_voice_id ? { voiceId: value.cartesia_voice_id } : {})}
+      />
     </div>
   );
 }
@@ -991,6 +1101,12 @@ function PollyFields({
           polly_voice_id: value.polly_voice_id ?? 'Matthew',
           polly_engine:   value.polly_engine ?? 'neural',
         }}
+      />
+
+      {/* Polly uses AWS env var credentials — no UI API key, still testable */}
+      <TestApiAccessButton
+        provider="polly"
+        apiKey="__env__"
       />
     </div>
   );
@@ -1065,6 +1181,11 @@ function OpenAiTtsFields({
           openai_speed:   value.openai_speed ?? 1.0,
         }}
         disabled={!value.openai_api_key}
+      />
+
+      <TestApiAccessButton
+        provider="openai"
+        {...(value.openai_api_key ? { apiKey: value.openai_api_key } : {})}
       />
     </div>
   );
@@ -1249,6 +1370,11 @@ export function TtsConfigForm({ value, onChange, errors, activePersona = 'standa
         {value.engine === 'openai'      && <OpenAiTtsFields value={value} set={set} />}
         {value.engine === 'espeak'      && <ESpeakFields    value={value} set={set} />}
       </div>
+
+      {/* Global voice fallback note — reminds users per-persona voices take precedence */}
+      <p className="text-xs text-gray-500 dark:text-gray-400">
+        This voice is the default fallback. Each personality has its own curated voice — configure in the Personality tab.
+      </p>
     </div>
     </PersonaContext.Provider>
   );

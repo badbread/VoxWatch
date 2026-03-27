@@ -42,7 +42,7 @@ import { useMutation } from '@tanstack/react-query';
 import { cn } from '@/utils/cn';
 import { generateIntroAudio, uploadIntroAudio, previewAudio } from '@/api/status';
 import { AudioPreview } from '@/components/common/AudioPreview';
-import type { ResponseModeConfig, DispatchConfig, TtsConfig, ConfigValidationError } from '@/types/config';
+import type { ResponseModeConfig, DispatchConfig, TtsConfig, ConfigValidationError, ModeVoiceConfig } from '@/types/config';
 
 /** Maximum recommended character count for a custom response mode prompt. */
 const CUSTOM_PROMPT_MAX = 800;
@@ -330,10 +330,32 @@ const ELEVENLABS_DISPATCHER_PRESETS = [
 /** ElevenLabs officer voice presets — curated for responding officer segments. */
 const ELEVENLABS_OFFICER_PRESETS = [
   { id: 'ErXwobaYiN019PkySvjV', label: 'Antoni — Authoritative Male (recommended)' },
+  { id: '9CuE3aTXEwR00eVzenBK', label: 'Vet Sergeant — Gruff Male' },
   { id: 'VR6AewLTigWG4xSOukaG', label: 'Arnold — Deep Male' },
   { id: 'pNInz6obpgDQGcFmaJgB', label: 'Adam — Commanding Male' },
   { id: 'yoZ06aMxZJJ28mfd3POQ', label: 'Sam — Gruff Male' },
 ];
+
+/**
+ * Curated default voices per persona per TTS provider.
+ * These are the recommended voices for each personality.
+ * Users can override in the voice section, and the global TTS voice is the final fallback.
+ */
+const PERSONA_VOICE_DEFAULTS: Record<string, ModeVoiceConfig> = {
+  police_dispatch:        { kokoro_voice: 'af_bella',   openai_voice: 'nova',    elevenlabs_voice: '46zEzba8Y8yQ0bVcv5O9' },
+  live_operator:          { kokoro_voice: 'am_michael', openai_voice: 'onyx',    elevenlabs_voice: 'ErXwobaYiN019PkySvjV' },
+  private_security:       { kokoro_voice: 'am_fenrir',  openai_voice: 'echo',    elevenlabs_voice: 'pNInz6obpgDQGcFmaJgB' },
+  recorded_evidence:      { kokoro_voice: 'af_kore',    openai_voice: 'alloy' },
+  homeowner:              { kokoro_voice: 'af_heart',   openai_voice: 'nova' },
+  automated_surveillance: { kokoro_voice: 'af_kore',    openai_voice: 'nova' },
+  guard_dog:              { kokoro_voice: 'am_adam',    openai_voice: 'onyx' },
+  neighborhood_watch:     { kokoro_voice: 'af_sarah',   openai_voice: 'shimmer' },
+  mafioso:                { kokoro_voice: 'am_fenrir',  openai_voice: 'onyx' },
+  tony_montana:           { kokoro_voice: 'am_fenrir',  openai_voice: 'echo' },
+  pirate_captain:         { kokoro_voice: 'am_adam',    openai_voice: 'fable' },
+  british_butler:         { kokoro_voice: 'bm_george',  openai_voice: 'echo' },
+  disappointed_parent:    { kokoro_voice: 'af_nicole',  openai_voice: 'nova' },
+};
 
 // ---------------------------------------------------------------------------
 // DispatchSettings panel
@@ -1842,8 +1864,74 @@ export function PersonaConfigForm({ value, onChange, ttsConfig }: PersonaConfigF
     FUN_MODES.some((m) => m.id === activeName),
   );
 
+  /** Whether the per-persona voice override section is expanded. */
+  const [voiceSectionOpen, setVoiceSectionOpen] = useState(false);
+
   /** Audio preview mutation — same pattern as TtsConfigForm. */
   const previewMutation = useMutation({ mutationFn: previewAudio });
+
+  // ── Voice override helpers ─────────────────────────────────────────────────
+  // Computed once per render; used by both the voice selector panel and the
+  // Preview Voice button so the resolved voice is always consistent.
+
+  /** Returns the ModeVoiceConfig field name for the active TTS engine, or null if unsupported. */
+  function voiceFieldForEngine(engine: string): keyof ModeVoiceConfig | null {
+    if (engine === 'kokoro')     return 'kokoro_voice';
+    if (engine === 'openai')     return 'openai_voice';
+    if (engine === 'elevenlabs') return 'elevenlabs_voice';
+    if (engine === 'piper')      return 'piper_model';
+    return null;
+  }
+
+  const _engine         = ttsConfig?.engine ?? 'kokoro';
+  const _voiceField     = voiceFieldForEngine(_engine);
+  const _curatedDefault = PERSONA_VOICE_DEFAULTS[activeName] ?? {};
+  const _userOverride   = value.voice_overrides?.[activeName] ?? {};
+  const _hasVoiceOverride = _voiceField ? Boolean(_userOverride[_voiceField]) : false;
+
+  /**
+   * Resolves the effective voice for the active engine following the priority:
+   * user override → curated default → global TTS config voice.
+   */
+  function resolveEffectiveVoice(): string {
+    if (_voiceField && _userOverride[_voiceField]) return _userOverride[_voiceField] as string;
+    if (_voiceField && _curatedDefault[_voiceField]) return _curatedDefault[_voiceField] as string;
+    if (_engine === 'kokoro')     return ttsConfig?.kokoro_voice ?? 'af_heart';
+    if (_engine === 'openai')     return ttsConfig?.openai_voice ?? 'onyx';
+    if (_engine === 'elevenlabs') return ttsConfig?.elevenlabs_voice_id ?? '';
+    if (_engine === 'piper')      return ttsConfig?.piper_model ?? 'en_US-lessac-medium';
+    return '';
+  }
+
+  const _effectiveVoice = resolveEffectiveVoice();
+
+  /** Apply a voice override for the current persona + engine. */
+  function handlePersonaVoiceChange(selectedValue: string) {
+    if (!_voiceField) return;
+    onChange({
+      ...value,
+      voice_overrides: {
+        ...value.voice_overrides,
+        [activeName]: {
+          ...(value.voice_overrides?.[activeName] ?? {}),
+          [_voiceField]: selectedValue,
+        },
+      },
+    });
+  }
+
+  /** Remove the voice override for the current persona. */
+  function handlePersonaVoiceReset() {
+    const overrides = { ...(value.voice_overrides ?? {}) };
+    delete overrides[activeName];
+    const updated = { ...value };
+    if (Object.keys(overrides).length) {
+      updated.voice_overrides = overrides;
+    } else {
+      delete updated.voice_overrides;
+    }
+    onChange(updated);
+  }
 
   /** All modes combined for lookup. */
   const ALL_MODES = [...CORE_MODES, ...SITUATIONAL_MODES, ...FUN_MODES];
@@ -2039,6 +2127,213 @@ export function PersonaConfigForm({ value, onChange, ttsConfig }: PersonaConfigF
         </div>
       )}
 
+      {/* ── Per-persona voice selector ─────────────────────────────────────── */}
+      {activeName !== 'custom' && ttsConfig && (
+        <div className="rounded-xl border border-gray-200 dark:border-gray-700/50">
+          {/* Collapsible header */}
+          <button
+            type="button"
+            onClick={() => setVoiceSectionOpen((v) => !v)}
+            className={cn(
+              'flex w-full items-center justify-between px-4 py-2.5',
+              'text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400',
+              'hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors rounded-xl',
+              voiceSectionOpen && 'rounded-b-none',
+            )}
+            aria-expanded={voiceSectionOpen}
+          >
+            <span>Voice</span>
+            {voiceSectionOpen ? (
+              <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
+            ) : (
+              <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+            )}
+          </button>
+
+          {voiceSectionOpen && (
+            <div className="border-t border-gray-200 dark:border-gray-700/50 px-4 py-3 space-y-3">
+              {/* Helper text */}
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Each personality has a curated voice for best results. Override below, or leave
+                as default. The voice in TTS settings is the global fallback.
+              </p>
+
+              {/* No voice selector for cartesia / polly / espeak */}
+              {!_voiceField ? (
+                <p className="text-xs text-gray-400 dark:text-gray-500">
+                  Per-persona voice selection is not available for {_engine}.
+                </p>
+              ) : (
+                <>
+                  {/* Kokoro voice selector */}
+                  {_engine === 'kokoro' && (
+                    <div>
+                      <label
+                        htmlFor="persona-voice-kokoro"
+                        className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300"
+                      >
+                        Kokoro Voice
+                        {_hasVoiceOverride && (
+                          <span className="ml-1.5 rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                            Overridden
+                          </span>
+                        )}
+                      </label>
+                      <select
+                        id="persona-voice-kokoro"
+                        value={_effectiveVoice}
+                        onChange={(e) => handlePersonaVoiceChange(e.target.value)}
+                        className={cn(
+                          'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm',
+                          'focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500',
+                          'dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100',
+                        )}
+                      >
+                        <optgroup label="American Female">
+                          <option value="af_heart">af_heart — American Female (A)</option>
+                          <option value="af_bella">af_bella — American Female (A-)</option>
+                          <option value="af_nicole">af_nicole — American Female (B-)</option>
+                          <option value="af_sarah">af_sarah — American Female (C+)</option>
+                          <option value="af_kore">af_kore — American Female (C+)</option>
+                        </optgroup>
+                        <optgroup label="American Male">
+                          <option value="am_michael">am_michael — American Male (C+)</option>
+                          <option value="am_fenrir">am_fenrir — American Male (C+)</option>
+                          <option value="am_adam">am_adam — American Male (F+)</option>
+                          <option value="am_onyx">am_onyx — American Male (D)</option>
+                        </optgroup>
+                        <optgroup label="British">
+                          <option value="bm_george">bm_george — British Male (C)</option>
+                          <option value="bf_emma">bf_emma — British Female (B-)</option>
+                          <option value="bm_fable">bm_fable — British Male (C)</option>
+                        </optgroup>
+                      </select>
+                    </div>
+                  )}
+
+                  {/* OpenAI voice selector */}
+                  {_engine === 'openai' && (
+                    <div>
+                      <label
+                        htmlFor="persona-voice-openai"
+                        className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300"
+                      >
+                        OpenAI Voice
+                        {_hasVoiceOverride && (
+                          <span className="ml-1.5 rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                            Overridden
+                          </span>
+                        )}
+                      </label>
+                      <select
+                        id="persona-voice-openai"
+                        value={_effectiveVoice}
+                        onChange={(e) => handlePersonaVoiceChange(e.target.value)}
+                        className={cn(
+                          'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm',
+                          'focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500',
+                          'dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100',
+                        )}
+                      >
+                        <option value="alloy">alloy — Neutral, balanced</option>
+                        <option value="echo">echo — Deeper, authoritative</option>
+                        <option value="fable">fable — Warm, expressive</option>
+                        <option value="onyx">onyx — Deep, commanding</option>
+                        <option value="nova">nova — Bright, energetic</option>
+                        <option value="shimmer">shimmer — Clear, pleasant</option>
+                      </select>
+                    </div>
+                  )}
+
+                  {/* ElevenLabs voice text input */}
+                  {_engine === 'elevenlabs' && (
+                    <div>
+                      <label
+                        htmlFor="persona-voice-elevenlabs"
+                        className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300"
+                      >
+                        ElevenLabs Voice ID
+                        {_hasVoiceOverride && (
+                          <span className="ml-1.5 rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                            Overridden
+                          </span>
+                        )}
+                      </label>
+                      <input
+                        id="persona-voice-elevenlabs"
+                        type="text"
+                        value={_userOverride.elevenlabs_voice ?? ''}
+                        onChange={(e) => handlePersonaVoiceChange(e.target.value)}
+                        placeholder={_curatedDefault.elevenlabs_voice ?? 'Paste voice ID from elevenlabs.io'}
+                        className={cn(
+                          'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono',
+                          'focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500',
+                          'dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100',
+                          'placeholder:text-gray-400 dark:placeholder:text-gray-500',
+                        )}
+                      />
+                      {_curatedDefault.elevenlabs_voice && (
+                        <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">
+                          Curated default: <code className="font-mono">{_curatedDefault.elevenlabs_voice}</code>
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Piper model selector */}
+                  {_engine === 'piper' && (
+                    <div>
+                      <label
+                        htmlFor="persona-voice-piper"
+                        className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300"
+                      >
+                        Piper Model
+                        {_hasVoiceOverride && (
+                          <span className="ml-1.5 rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                            Overridden
+                          </span>
+                        )}
+                      </label>
+                      <select
+                        id="persona-voice-piper"
+                        value={_effectiveVoice}
+                        onChange={(e) => handlePersonaVoiceChange(e.target.value)}
+                        className={cn(
+                          'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm',
+                          'focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500',
+                          'dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100',
+                        )}
+                      >
+                        <option value="en_US-lessac-medium">en_US-lessac-medium</option>
+                        <option value="en_US-ryan-medium">en_US-ryan-medium</option>
+                        <option value="en_US-amy-medium">en_US-amy-medium</option>
+                        <option value="en_GB-alan-medium">en_GB-alan-medium</option>
+                      </select>
+                    </div>
+                  )}
+
+                  {/* Reset to Default — only shown when an override is active */}
+                  {_hasVoiceOverride && (
+                    <button
+                      type="button"
+                      onClick={handlePersonaVoiceReset}
+                      className={cn(
+                        'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium',
+                        'border border-gray-200 text-gray-500 hover:border-gray-300 hover:bg-gray-50',
+                        'dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800/40',
+                        'transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
+                      )}
+                    >
+                      Reset to Default
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── Audio preview ──────────────────────────────────────────────────── */}
       {activeName !== 'custom' && ttsConfig && (
         <div className="space-y-2">
@@ -2050,39 +2345,39 @@ export function PersonaConfigForm({ value, onChange, ttsConfig }: PersonaConfigF
             generationTimeMs={previewMutation.data?.generationTimeMs}
           />
 
-          {/* Preview Voice button — triggers TTS synthesis of the example text */}
+          {/* Preview Voice button — uses per-persona voice override → curated default → global TTS config. */}
           {!previewMutation.isPending && (
             <button
               type="button"
               onClick={() => {
                 const text = getPreviewText(activeName, value);
                 if (!text || !ttsConfig) return;
-                const engine = ttsConfig.engine ?? 'kokoro';
-                let voice = 'af_heart';
+
+                // Use the voice helpers computed in the component body (_userOverride,
+                // _curatedDefault, _engine) so the preview uses the exact same resolution
+                // logic as the voice selector panel above.
+                let voice = _effectiveVoice || 'af_heart';
                 let speed = 1.0;
-                if (engine === 'kokoro') {
-                  voice = ttsConfig.kokoro_voice ?? 'af_heart';
+
+                if (_engine === 'kokoro') {
                   speed = ttsConfig.kokoro_speed ?? 1.0;
-                } else if (engine === 'piper') {
-                  voice = ttsConfig.piper_model ?? 'en_US-lessac-medium';
+                } else if (_engine === 'piper') {
                   speed = ttsConfig.voice_speed ?? 1.0;
-                } else if (engine === 'espeak') {
+                } else if (_engine === 'espeak') {
                   voice = 'espeak';
                   speed = (ttsConfig.espeak_speed ?? 175) / 175;
-                } else if (engine === 'elevenlabs') {
-                  voice = ttsConfig.elevenlabs_voice_id ?? 'pNInz6obpgDQGcFmaJgB';
-                } else if (engine === 'openai') {
-                  voice = ttsConfig.openai_voice ?? 'onyx';
+                } else if (_engine === 'openai') {
                   speed = ttsConfig.openai_speed ?? 1.0;
-                } else if (engine === 'cartesia') {
+                } else if (_engine === 'cartesia') {
                   voice = ttsConfig.cartesia_voice_id ?? '';
                   speed = ttsConfig.cartesia_speed ?? 1.0;
                 }
+
                 previewMutation.mutate({
                   persona: activeName,
                   message: text,
                   voice,
-                  provider: engine,
+                  provider: _engine,
                   speed,
                 });
               }}

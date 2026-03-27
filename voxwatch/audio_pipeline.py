@@ -50,6 +50,7 @@ import unicodedata
 import aiohttp
 
 from voxwatch.tts.factory import generate_with_fallback, get_provider
+from voxwatch.modes.mode import VoiceConfig
 
 logger = logging.getLogger("voxwatch.audio")
 
@@ -265,6 +266,50 @@ class AudioPipeline:
         message = _sanitize_tts_input(message)
 
         success = await generate_with_fallback(message, output_path, self.config)
+        if not success:
+            logger.error("All TTS providers in fallback_chain exhausted — no audio generated")
+        return success
+
+    async def generate_tts_with_voice(
+        self,
+        message: str,
+        output_path: str,
+        voice_config: "VoiceConfig | None" = None,
+    ) -> bool:
+        """Generate speech with optional per-mode voice overrides.
+
+        Creates a shallow copy of the service config and merges any non-None
+        voice fields from *voice_config* into the ``tts`` section before
+        delegating to ``generate_with_fallback``.  When *voice_config* is
+        ``None`` or all its fields are ``None``, this behaves identically
+        to ``generate_tts``.
+
+        Args:
+            message: Text to synthesise.
+            output_path: Where to write the output WAV file.
+            voice_config: Optional VoiceConfig with per-provider voice
+                overrides.  Only non-None fields are applied.
+
+        Returns:
+            True if audio was successfully generated.
+        """
+        message = _sanitize_tts_input(message)
+
+        cfg = self.config
+        if voice_config is not None:
+            # Shallow-copy config and tts sub-dict so the live config is untouched.
+            cfg = {**cfg, "tts": {**cfg.get("tts", {})}}
+            tts = cfg["tts"]
+            if voice_config.kokoro_voice:
+                tts["kokoro_voice"] = voice_config.kokoro_voice
+            if voice_config.openai_voice:
+                tts["openai_voice"] = voice_config.openai_voice
+            if voice_config.elevenlabs_voice:
+                tts["elevenlabs_voice_id"] = voice_config.elevenlabs_voice
+            if voice_config.piper_model:
+                tts["piper_model"] = voice_config.piper_model
+
+        success = await generate_with_fallback(message, output_path, cfg)
         if not success:
             logger.error("All TTS providers in fallback_chain exhausted — no audio generated")
         return success
@@ -1034,8 +1079,13 @@ class AudioPipeline:
         builtin_durations = {"short": 0.5, "long": 1.0, "siren": 1.5}
         return builtin_durations.get(tone_name, 2.0)
 
-    async def generate_and_push(self, camera_stream: str, message: str,
-                                 stage_label: str) -> bool:
+    async def generate_and_push(
+        self,
+        camera_stream: str,
+        message: str,
+        stage_label: str,
+        voice_config: "VoiceConfig | None" = None,
+    ) -> bool:
         """Generate TTS, convert to camera format, optionally prepend a tone, and push.
 
         Full pipeline for Stage 2 and Stage 3:
@@ -1052,6 +1102,8 @@ class AudioPipeline:
                 values are ``"stage2"`` and ``"stage3"``; the same string is
                 used to look up the per-stage tone override key in config
                 (e.g. ``stage_label="stage2"`` -> config key ``"stage2_tone"``).
+            voice_config: Optional per-mode voice overrides applied before TTS
+                generation.  When ``None`` the global TTS config is used as-is.
 
         Returns:
             True if the full pipeline succeeded.
@@ -1059,9 +1111,9 @@ class AudioPipeline:
         tts_path = os.path.join(self._serve_dir, f"{stage_label}_tts.wav")
         output_path = os.path.join(self._serve_dir, f"{stage_label}_ready.wav")
 
-        # Step 1: Generate TTS
+        # Step 1: Generate TTS (with optional per-mode voice override)
         logger.info("[%s] Generating TTS (%d chars)...", stage_label, len(message))
-        if not await self.generate_tts(message, tts_path):
+        if not await self.generate_tts_with_voice(message, tts_path, voice_config):
             logger.error("[%s] TTS generation failed", stage_label)
             return False
 
@@ -1108,12 +1160,13 @@ class AudioPipeline:
         self,
         phrases: list[str],
         output_path: str,
+        voice_config: "VoiceConfig | None" = None,
     ) -> bool:
         """Generate natural-sounding speech from a list of short phrases.
 
         Delegates to ``voxwatch.speech.natural_cadence.generate_natural_speech``
         to produce audio with human-like inter-phrase pauses and optional
-        per-phrase speed variation.  Falls back to a single ``generate_tts``
+        per-phrase speed variation.  Falls back to a single ``generate_tts_with_voice``
         call with all phrases joined by spaces if natural cadence generation
         fails for any reason, ensuring the pipeline is always non-fatal.
 
@@ -1129,6 +1182,10 @@ class AudioPipeline:
                 The WAV is in the internal working format (44.1 kHz 16-bit mono)
                 and must be converted to the camera codec by the caller via
                 ``convert_audio``.
+            voice_config: Optional per-mode voice overrides applied when the
+                flat-string fallback path is taken.  Passed through to
+                ``generate_tts_with_voice``.  Natural cadence path uses the
+                pipeline's config directly via ``generate_natural_speech``.
 
         Returns:
             True if audio was successfully written to ``output_path``, either
@@ -1161,7 +1218,7 @@ class AudioPipeline:
                     exc,
                 )
 
-        # Fallback: join all phrases into a single string and call standard TTS.
+        # Fallback: join all phrases into a single string and call TTS with voice override.
         fallback_text = " ".join(p.strip() for p in phrases if p.strip())
         if not fallback_text:
             logger.error("generate_natural_tts: no usable text in phrase list")
@@ -1170,7 +1227,7 @@ class AudioPipeline:
         logger.info(
             "generate_natural_tts: using flat-string fallback (%d chars)", len(fallback_text)
         )
-        return await self.generate_tts(fallback_text, output_path)
+        return await self.generate_tts_with_voice(fallback_text, output_path, voice_config)
 
     async def reload_tts(self, config: dict) -> None:
         """Reinitialise the TTS provider from an updated config dict.

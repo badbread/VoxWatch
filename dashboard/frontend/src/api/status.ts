@@ -79,6 +79,48 @@ export async function testTtsVoice(req: TtsTestRequest): Promise<TtsTestResponse
 }
 
 // ---------------------------------------------------------------------------
+// TTS provider API access test
+// ---------------------------------------------------------------------------
+
+/** Request body for POST /api/audio/test-tts-provider. */
+export interface TestTtsProviderRequest {
+  /** TTS provider identifier (e.g. "elevenlabs", "openai", "cartesia", "polly"). */
+  provider: string;
+  /** Provider API key to test.  Leave undefined to test with the currently saved key. */
+  api_key?: string;
+  /** Optional voice ID to include in the test request (validates voice access too). */
+  voice_id?: string;
+}
+
+/** Result from testTtsProvider. */
+export interface TestTtsProviderResult {
+  /** Whether the provider API is accessible with the given credentials. */
+  ok: boolean;
+  /** Human-readable status message describing the test outcome. */
+  message: string;
+  /** Round-trip latency in milliseconds. */
+  latency_ms: number;
+}
+
+/**
+ * POST /api/audio/test-tts-provider — Verify API key access for a cloud TTS provider.
+ *
+ * Sends a minimal request to the provider's API to confirm the key is valid
+ * and the service is reachable.  Does not synthesize audio; latency reflects
+ * auth round-trip only.
+ *
+ * @param req  Provider, optional API key, optional voice ID.
+ * @returns    Result with ok flag, message, and latency.
+ * @throws     ApiError on network failure or server error.
+ */
+export async function testTtsProvider(req: TestTtsProviderRequest): Promise<TestTtsProviderResult> {
+  const response = await apiClient.post<TestTtsProviderResult>('/audio/test-tts-provider', req, {
+    timeout: 15_000,
+  });
+  return response.data;
+}
+
+// ---------------------------------------------------------------------------
 // Audio preview API
 // ---------------------------------------------------------------------------
 
@@ -104,6 +146,10 @@ export interface AudioPreviewResult {
   blob: Blob;
   /** Synthesis latency in milliseconds from the X-Generation-Time header. */
   generationTimeMs: number;
+  /** When true, a fallback TTS provider was used instead of the configured one. */
+  fallbackUsed?: boolean;
+  /** Name of the provider that actually generated the audio. */
+  actualProvider?: string;
 }
 
 /**
@@ -128,7 +174,11 @@ export async function previewAudio(req: AudioPreviewRequest): Promise<AudioPrevi
   const headerMs = response.headers['x-generation-time'];
   const generationTimeMs = headerMs ? parseInt(headerMs, 10) : 0;
 
-  return { blob: response.data, generationTimeMs };
+  // Read fallback provider headers — set by backend when configured TTS fails.
+  const fallbackUsed = response.headers['x-tts-fallback'] === 'true';
+  const actualProvider = response.headers['x-tts-provider'] || undefined;
+
+  return { blob: response.data, generationTimeMs, fallbackUsed, actualProvider };
 }
 
 /** Request body for POST /api/audio/generate-intro. */

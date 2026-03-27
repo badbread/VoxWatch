@@ -2,9 +2,10 @@
 audio.py — Audio Test and Preview API Router
 
 Endpoints:
-    POST /api/audio/test     — Trigger a test audio push to a camera via go2rtc
-    POST /api/audio/preview  — Generate a deterrent message sample and return
-                               raw WAV audio for in-browser playback
+    POST /api/audio/test               — Trigger a test audio push to a camera via go2rtc
+    POST /api/audio/preview            — Generate a deterrent message sample and return
+                                         raw WAV audio for in-browser playback
+    POST /api/audio/test-tts-provider  — Validate cloud TTS provider credentials (no audio)
 
 The test endpoint is intended for setup verification: it pushes a short test
 tone or a canned message to a camera's speaker so the user can confirm the
@@ -1112,7 +1113,9 @@ async def _proxy_dispatch_preview(request: "PreviewRequest") -> Optional[bytes]:
         "Synthesizes a deterrent message using the specified TTS provider and persona, "
         "then returns the raw WAV audio for in-browser playback. "
         "No camera speaker is involved — this is a pure preview for voice selection. "
-        "Supported providers: kokoro (remote HTTP server), piper (local), espeak (local fallback)."
+        "Supported providers: kokoro (remote HTTP server), piper (local), espeak (local fallback). "
+        "Response headers X-TTS-Provider, X-TTS-Configured, and X-TTS-Fallback indicate which "
+        "provider actually generated the audio and whether a fallback occurred."
     ),
     response_class=StreamingResponse,
     responses={
@@ -1122,6 +1125,18 @@ async def _proxy_dispatch_preview(request: "PreviewRequest") -> Optional[bytes]:
             "headers": {
                 "X-Generation-Time": {
                     "description": "Synthesis latency in milliseconds",
+                    "schema": {"type": "string"},
+                },
+                "X-TTS-Provider": {
+                    "description": "TTS provider that actually generated the audio",
+                    "schema": {"type": "string"},
+                },
+                "X-TTS-Configured": {
+                    "description": "TTS provider that was requested/configured",
+                    "schema": {"type": "string"},
+                },
+                "X-TTS-Fallback": {
+                    "description": "Whether a fallback provider was used ('true' or 'false')",
                     "schema": {"type": "string"},
                 },
             },
@@ -1142,12 +1157,22 @@ async def preview_audio(request: PreviewRequest) -> StreamingResponse:
     after the subprocess/HTTP call finishes.  The temp file is deleted after
     the response is streamed.
 
+    For cloud providers (ElevenLabs, OpenAI, Cartesia), if synthesis fails due
+    to a missing or invalid API key, the endpoint falls back to espeak rather
+    than returning an error, so the user always hears something.  The response
+    headers X-TTS-Provider, X-TTS-Configured, and X-TTS-Fallback communicate
+    what actually happened so the frontend can surface a warning if needed.
+
     Args:
         request: PreviewRequest with persona, voice, provider, optional message,
                  and speed.
 
     Returns:
-        StreamingResponse with Content-Type audio/wav and X-Generation-Time header.
+        StreamingResponse with Content-Type audio/wav and headers:
+        - X-Generation-Time: synthesis latency in milliseconds.
+        - X-TTS-Provider: provider that actually generated the audio.
+        - X-TTS-Configured: provider that was requested/configured.
+        - X-TTS-Fallback: "true" if a fallback provider was used, "false" otherwise.
 
     Raises:
         400: If provider is unsupported (cloud providers that need full factory machinery).
@@ -1155,6 +1180,12 @@ async def preview_audio(request: PreviewRequest) -> StreamingResponse:
         503: If a required local binary (piper, espeak-ng) is not installed.
         504: If synthesis exceeds the timeout.
     """
+    # Track which provider was requested and which actually ran, so the headers
+    # can accurately reflect whether a fallback occurred.
+    configured_provider = request.provider.lower()
+    actual_provider = configured_provider
+    used_fallback = False
+
     # ── Proxy to VoxWatch Preview API when needed ────────────────────────────
     # Dispatch previews require the full VoxWatch pipeline (channel intro,
     # random chatter, multi-segment TTS, radio effects, officer response).
@@ -1182,6 +1213,9 @@ async def preview_audio(request: PreviewRequest) -> StreamingResponse:
                 media_type="audio/wav",
                 headers={
                     "X-Generation-Time": str(elapsed_ms),
+                    "X-TTS-Provider": configured_provider,
+                    "X-TTS-Configured": configured_provider,
+                    "X-TTS-Fallback": "false",
                     "Cache-Control": "no-store",
                 },
             )
@@ -1260,6 +1294,8 @@ async def preview_audio(request: PreviewRequest) -> StreamingResponse:
                         "Piper not available in dashboard container, "
                         "falling back to espeak for preview"
                     )
+                    actual_provider = "espeak"
+                    used_fallback = True
                     wpm = int(min(450, max(80, 175 * request.speed)))
                     await _synthesize_espeak(
                         message=message,
@@ -1282,40 +1318,137 @@ async def preview_audio(request: PreviewRequest) -> StreamingResponse:
             )
 
         elif provider == "elevenlabs":
+            # Attempt ElevenLabs synthesis.  If the API key is missing or the
+            # call fails, fall back to espeak so the user hears something and
+            # the headers explain what happened.
             api_key = await _resolve_cloud_tts_key("elevenlabs_api_key")
             if not api_key:
-                raise HTTPException(status_code=400, detail="No ElevenLabs API key configured")
-            await _synthesize_elevenlabs(
-                message=message,
-                api_key=api_key,
-                voice_id=request.voice or "pNInz6obpgDQGcFmaJgB",
-                model="eleven_flash_v2_5",
-                output_path=tmp_path,
-            )
+                logger.warning(
+                    "ElevenLabs API key not configured — falling back to espeak for preview. "
+                    "Set tts.elevenlabs_api_key in config.yaml to enable ElevenLabs preview."
+                )
+                actual_provider = "espeak"
+                used_fallback = True
+                wpm = int(min(450, max(80, 175 * request.speed)))
+                await _synthesize_espeak(
+                    message=message,
+                    speed=wpm,
+                    pitch=50,
+                    output_path=tmp_path,
+                )
+            else:
+                try:
+                    await _synthesize_elevenlabs(
+                        message=message,
+                        api_key=api_key,
+                        voice_id=request.voice or "pNInz6obpgDQGcFmaJgB",
+                        model="eleven_flash_v2_5",
+                        output_path=tmp_path,
+                    )
+                except HTTPException as exc:
+                    # API key invalid or ElevenLabs returned an error — fall back to
+                    # espeak so the preview still works and the user can hear something.
+                    logger.warning(
+                        "ElevenLabs synthesis failed (HTTP %d: %s) — "
+                        "falling back to espeak for preview.",
+                        exc.status_code,
+                        exc.detail,
+                    )
+                    actual_provider = "espeak"
+                    used_fallback = True
+                    wpm = int(min(450, max(80, 175 * request.speed)))
+                    await _synthesize_espeak(
+                        message=message,
+                        speed=wpm,
+                        pitch=50,
+                        output_path=tmp_path,
+                    )
 
         elif provider == "openai":
+            # Same fallback pattern as ElevenLabs.
             api_key = await _resolve_cloud_tts_key("openai_api_key")
             if not api_key:
-                raise HTTPException(status_code=400, detail="No OpenAI API key configured")
-            await _synthesize_openai_tts(
-                message=message,
-                api_key=api_key,
-                voice=request.voice or "onyx",
-                model="tts-1",
-                speed=request.speed,
-                output_path=tmp_path,
-            )
+                logger.warning(
+                    "OpenAI API key not configured — falling back to espeak for preview. "
+                    "Set tts.openai_api_key in config.yaml to enable OpenAI TTS preview."
+                )
+                actual_provider = "espeak"
+                used_fallback = True
+                wpm = int(min(450, max(80, 175 * request.speed)))
+                await _synthesize_espeak(
+                    message=message,
+                    speed=wpm,
+                    pitch=50,
+                    output_path=tmp_path,
+                )
+            else:
+                try:
+                    await _synthesize_openai_tts(
+                        message=message,
+                        api_key=api_key,
+                        voice=request.voice or "onyx",
+                        model="tts-1",
+                        speed=request.speed,
+                        output_path=tmp_path,
+                    )
+                except HTTPException as exc:
+                    logger.warning(
+                        "OpenAI TTS synthesis failed (HTTP %d: %s) — "
+                        "falling back to espeak for preview.",
+                        exc.status_code,
+                        exc.detail,
+                    )
+                    actual_provider = "espeak"
+                    used_fallback = True
+                    wpm = int(min(450, max(80, 175 * request.speed)))
+                    await _synthesize_espeak(
+                        message=message,
+                        speed=wpm,
+                        pitch=50,
+                        output_path=tmp_path,
+                    )
 
         elif provider == "cartesia":
+            # Same fallback pattern as ElevenLabs.
             api_key = await _resolve_cloud_tts_key("cartesia_api_key")
             if not api_key:
-                raise HTTPException(status_code=400, detail="No Cartesia API key configured")
-            await _synthesize_cartesia(
-                message=message,
-                api_key=api_key,
-                voice_id=request.voice or "",
-                output_path=tmp_path,
-            )
+                logger.warning(
+                    "Cartesia API key not configured — falling back to espeak for preview. "
+                    "Set tts.cartesia_api_key in config.yaml to enable Cartesia preview."
+                )
+                actual_provider = "espeak"
+                used_fallback = True
+                wpm = int(min(450, max(80, 175 * request.speed)))
+                await _synthesize_espeak(
+                    message=message,
+                    speed=wpm,
+                    pitch=50,
+                    output_path=tmp_path,
+                )
+            else:
+                try:
+                    await _synthesize_cartesia(
+                        message=message,
+                        api_key=api_key,
+                        voice_id=request.voice or "",
+                        output_path=tmp_path,
+                    )
+                except HTTPException as exc:
+                    logger.warning(
+                        "Cartesia synthesis failed (HTTP %d: %s) — "
+                        "falling back to espeak for preview.",
+                        exc.status_code,
+                        exc.detail,
+                    )
+                    actual_provider = "espeak"
+                    used_fallback = True
+                    wpm = int(min(450, max(80, 175 * request.speed)))
+                    await _synthesize_espeak(
+                        message=message,
+                        speed=wpm,
+                        pitch=50,
+                        output_path=tmp_path,
+                    )
 
         else:
             raise HTTPException(
@@ -1374,9 +1507,11 @@ async def preview_audio(request: PreviewRequest) -> StreamingResponse:
         wav_bytes = Path(tmp_path).read_bytes()
 
         logger.info(
-            "Audio preview generated: provider=%s persona=%s voice=%s "
-            "message_len=%d elapsed_ms=%d",
-            provider,
+            "Audio preview generated: provider=%s (configured=%s fallback=%s) "
+            "persona=%s voice=%s message_len=%d elapsed_ms=%d",
+            actual_provider,
+            configured_provider,
+            used_fallback,
             request.persona,
             request.voice,
             len(message),
@@ -1388,6 +1523,9 @@ async def preview_audio(request: PreviewRequest) -> StreamingResponse:
             media_type="audio/wav",
             headers={
                 "X-Generation-Time": str(elapsed_ms),
+                "X-TTS-Provider": actual_provider,
+                "X-TTS-Configured": configured_provider,
+                "X-TTS-Fallback": "true" if used_fallback else "false",
                 "Cache-Control": "no-store",
             },
         )
@@ -1398,6 +1536,234 @@ async def preview_audio(request: PreviewRequest) -> StreamingResponse:
             Path(tmp_path).unlink(missing_ok=True)
         except Exception:
             pass
+
+
+# ── TTS provider test endpoint ────────────────────────────────────────────────
+
+
+class TestTtsProviderRequest(BaseModel):
+    """Request body for POST /api/audio/test-tts-provider."""
+
+    provider: str = Field(
+        description=(
+            "Cloud TTS provider to test: 'elevenlabs', 'openai', or 'cartesia'. "
+            "The provider name is case-insensitive."
+        )
+    )
+    api_key: Optional[str] = Field(
+        default=None,
+        description=(
+            "API key to test.  If omitted the key is read from the saved config "
+            "(tts.<provider>_api_key in config.yaml).  Pass this field explicitly "
+            "to test a new key before saving it to config."
+        ),
+    )
+    voice_id: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional voice identifier to validate.  Currently unused for the "
+            "lightweight connectivity check but reserved for future expansion."
+        ),
+    )
+
+
+class TestTtsProviderResult(BaseModel):
+    """Result of a TTS provider API connectivity test."""
+
+    ok: bool = Field(description="True if the API key is valid and the provider is reachable")
+    message: str = Field(description="Human-readable result or error description")
+    latency_ms: int = Field(description="Round-trip time to the provider's API in milliseconds")
+
+
+@router.post(
+    "/test-tts-provider",
+    response_model=TestTtsProviderResult,
+    summary="Test cloud TTS provider credentials",
+    description=(
+        "Validates API key access for a cloud TTS provider by making a lightweight "
+        "authenticated request (e.g. listing voices or fetching account info). "
+        "No audio is synthesized — this is purely a connectivity and auth check. "
+        "Supported providers: elevenlabs, openai, cartesia. "
+        "If api_key is omitted, the key from tts.<provider>_api_key in config.yaml is used."
+    ),
+    status_code=status.HTTP_200_OK,
+)
+async def test_tts_provider(request: TestTtsProviderRequest) -> TestTtsProviderResult:
+    """Test connectivity and authentication for a cloud TTS provider.
+
+    Makes the lightest available authenticated API call for each provider:
+    - ElevenLabs: GET /v1/user (returns subscription tier and character quota)
+    - OpenAI: GET /v1/models (confirms Bearer token is accepted)
+    - Cartesia: GET /voices (confirms X-API-Key header is accepted)
+
+    The api_key field is optional: if omitted, the key is resolved from the
+    saved config via ``_resolve_cloud_tts_key``, which handles ``${ENV_VAR}``
+    token expansion and masked (``***``) values.  Pass api_key explicitly to
+    test a new key before persisting it to config.
+
+    Args:
+        request: TestTtsProviderRequest with provider name and optional key.
+
+    Returns:
+        TestTtsProviderResult with ok, message, and latency_ms fields.
+        Always returns HTTP 200 — the ``ok`` field indicates pass/fail so the
+        frontend can display a consistent result regardless of auth outcome.
+    """
+    import time as _time
+
+    start = _time.monotonic()
+    provider = request.provider.lower()
+
+    # Resolve the API key: prefer the explicit field, then fall back to config.
+    api_key = request.api_key
+    if not api_key:
+        key_name_map = {
+            "elevenlabs": "elevenlabs_api_key",
+            "openai": "openai_api_key",
+            "cartesia": "cartesia_api_key",
+        }
+        key_name = key_name_map.get(provider)
+        if key_name:
+            api_key = await _resolve_cloud_tts_key(key_name)
+
+    if not api_key:
+        return TestTtsProviderResult(
+            ok=False,
+            message=f"No API key configured for {provider}. "
+                    f"Set tts.{provider}_api_key in config.yaml or pass api_key in the request.",
+            latency_ms=0,
+        )
+
+    try:
+        if provider == "elevenlabs":
+            # GET /v1/user returns subscription tier and character quota — a
+            # lightweight call that confirms both auth and account status.
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    "https://api.elevenlabs.io/v1/user",
+                    headers={"xi-api-key": api_key},
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    latency_ms = int((_time.monotonic() - start) * 1000)
+                    if resp.status == 401:
+                        return TestTtsProviderResult(
+                            ok=False,
+                            message="Invalid ElevenLabs API key (401 Unauthorized).",
+                            latency_ms=latency_ms,
+                        )
+                    if resp.status != 200:
+                        return TestTtsProviderResult(
+                            ok=False,
+                            message=f"ElevenLabs API returned HTTP {resp.status}.",
+                            latency_ms=latency_ms,
+                        )
+                    data = await resp.json()
+                    subscription = data.get("subscription", {})
+                    tier = subscription.get("tier", "unknown")
+                    chars_used = subscription.get("character_count", 0)
+                    chars_limit = subscription.get("character_limit", 0)
+                    return TestTtsProviderResult(
+                        ok=True,
+                        message=(
+                            f"Connected. Plan: {tier}. "
+                            f"Characters: {chars_used:,}/{chars_limit:,} used."
+                        ),
+                        latency_ms=latency_ms,
+                    )
+
+        elif provider == "openai":
+            # GET /v1/models confirms the Bearer token is accepted without
+            # actually running an inference request.
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    "https://api.openai.com/v1/models",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    latency_ms = int((_time.monotonic() - start) * 1000)
+                    if resp.status == 401:
+                        return TestTtsProviderResult(
+                            ok=False,
+                            message="Invalid OpenAI API key (401 Unauthorized).",
+                            latency_ms=latency_ms,
+                        )
+                    if resp.status != 200:
+                        return TestTtsProviderResult(
+                            ok=False,
+                            message=f"OpenAI API returned HTTP {resp.status}.",
+                            latency_ms=latency_ms,
+                        )
+                    return TestTtsProviderResult(
+                        ok=True,
+                        message="API key valid. OpenAI connected.",
+                        latency_ms=latency_ms,
+                    )
+
+        elif provider == "cartesia":
+            # GET /voices confirms the X-API-Key header is accepted without
+            # triggering a billable synthesis call.
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    "https://api.cartesia.ai/voices",
+                    headers={
+                        "X-API-Key": api_key,
+                        "Cartesia-Version": "2024-06-10",
+                    },
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    latency_ms = int((_time.monotonic() - start) * 1000)
+                    if resp.status in (401, 403):
+                        return TestTtsProviderResult(
+                            ok=False,
+                            message=f"Invalid Cartesia API key (HTTP {resp.status}).",
+                            latency_ms=latency_ms,
+                        )
+                    if resp.status != 200:
+                        return TestTtsProviderResult(
+                            ok=False,
+                            message=f"Cartesia API returned HTTP {resp.status}.",
+                            latency_ms=latency_ms,
+                        )
+                    return TestTtsProviderResult(
+                        ok=True,
+                        message="API key valid. Cartesia connected.",
+                        latency_ms=latency_ms,
+                    )
+
+        else:
+            return TestTtsProviderResult(
+                ok=False,
+                message=(
+                    f"Unknown cloud provider: '{provider}'. "
+                    "Supported values: elevenlabs, openai, cartesia."
+                ),
+                latency_ms=0,
+            )
+
+    except aiohttp.ClientConnectorError as exc:
+        latency_ms = int((_time.monotonic() - start) * 1000)
+        logger.warning("test-tts-provider: network error for %s: %s", provider, exc)
+        return TestTtsProviderResult(
+            ok=False,
+            message=f"Network error reaching {provider} API: {exc}",
+            latency_ms=latency_ms,
+        )
+    except asyncio.TimeoutError:
+        latency_ms = int((_time.monotonic() - start) * 1000)
+        logger.warning("test-tts-provider: timeout for %s", provider)
+        return TestTtsProviderResult(
+            ok=False,
+            message=f"{provider} API did not respond within 10 seconds.",
+            latency_ms=latency_ms,
+        )
+    except Exception as exc:
+        latency_ms = int((_time.monotonic() - start) * 1000)
+        logger.exception("test-tts-provider: unexpected error for %s", provider)
+        return TestTtsProviderResult(
+            ok=False,
+            message=str(exc),
+            latency_ms=latency_ms,
+        )
 
 
 # ── Dispatch intro upload ─────────────────────────────────────────────────────
