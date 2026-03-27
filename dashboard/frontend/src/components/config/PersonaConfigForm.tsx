@@ -316,6 +316,26 @@ function ModeCard({
 const DISPATCH_MODE_IDS = new Set(['police_dispatch']);
 
 // ---------------------------------------------------------------------------
+// ElevenLabs voice presets for dispatch roles
+// ---------------------------------------------------------------------------
+
+/** ElevenLabs dispatcher voice presets — curated for realistic police dispatch. */
+const ELEVENLABS_DISPATCHER_PRESETS = [
+  { id: '46zEzba8Y8yQ0bVcv5O9', label: 'Steady Dispatcher — Female (recommended)' },
+  { id: 'EXAVITQu4vr4xnSDxMaL', label: 'Bella — Professional Female' },
+  { id: 'jBpfAFnaylXS2mapolut', label: 'Dispatch Operator — Female' },
+  { id: '21m00Tcm4TlvDq8ikWAM', label: 'Rachel — Calm Female' },
+];
+
+/** ElevenLabs officer voice presets — curated for responding officer segments. */
+const ELEVENLABS_OFFICER_PRESETS = [
+  { id: 'ErXwobaYiN019PkySvjV', label: 'Antoni — Authoritative Male (recommended)' },
+  { id: 'VR6AewLTigWG4xSOukaG', label: 'Arnold — Deep Male' },
+  { id: 'pNInz6obpgDQGcFmaJgB', label: 'Adam — Commanding Male' },
+  { id: 'yoZ06aMxZJJ28mfd3POQ', label: 'Sam — Gruff Male' },
+];
+
+// ---------------------------------------------------------------------------
 // DispatchSettings panel
 // ---------------------------------------------------------------------------
 
@@ -1070,32 +1090,50 @@ function DispatchSettings({ value, onChange, ttsConfig }: DispatchSettingsProps)
                 htmlFor="dispatch-dispatcher-voice-elevenlabs"
                 className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300"
               >
-                Dispatcher Voice ID{' '}
-                <span className="font-normal text-gray-400 dark:text-gray-500">(female recommended)</span>
+                Dispatcher Voice
               </label>
-              <input
+              <select
                 id="dispatch-dispatcher-voice-elevenlabs"
-                type="text"
-                value={value.dispatcher_elevenlabs_voice ?? ''}
-                onChange={(e) => update({ dispatcher_elevenlabs_voice: e.target.value })}
-                placeholder="EXAVITQu4vr4xnSDxMaL"
+                value={ELEVENLABS_DISPATCHER_PRESETS.some((p) => p.id === (value.dispatcher_elevenlabs_voice ?? ''))
+                  ? (value.dispatcher_elevenlabs_voice ?? '')
+                  : (value.dispatcher_elevenlabs_voice ? '__custom__' : '')}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === '__custom__') return; // user will type below
+                  update({ dispatcher_elevenlabs_voice: v });
+                }}
                 className={cn(
-                  'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono',
+                  'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm',
                   'focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500',
                   'dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100',
-                  'placeholder:text-gray-400 dark:placeholder:text-gray-500',
                 )}
-              />
+              >
+                <optgroup label="Police / Dispatch">
+                  {ELEVENLABS_DISPATCHER_PRESETS.map((p) => (
+                    <option key={p.id} value={p.id}>{p.label}</option>
+                  ))}
+                </optgroup>
+                <optgroup label="Other">
+                  <option value="__custom__">Custom Voice ID...</option>
+                </optgroup>
+              </select>
+              {/* Show text input if custom or unrecognized voice ID */}
+              {(value.dispatcher_elevenlabs_voice && !ELEVENLABS_DISPATCHER_PRESETS.some((p) => p.id === value.dispatcher_elevenlabs_voice)) && (
+                <input
+                  type="text"
+                  value={value.dispatcher_elevenlabs_voice ?? ''}
+                  onChange={(e) => update({ dispatcher_elevenlabs_voice: e.target.value })}
+                  placeholder="Paste ElevenLabs voice ID"
+                  className={cn(
+                    'mt-1.5 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono',
+                    'focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500',
+                    'dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100',
+                    'placeholder:text-gray-400 dark:placeholder:text-gray-500',
+                  )}
+                />
+              )}
               <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">
-                ElevenLabs voice ID for the dispatcher. Default: Bella (professional female).{' '}
-                <a
-                  href="https://elevenlabs.io/voice-library"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-blue-500 hover:underline dark:text-blue-400"
-                >
-                  Browse voice library
-                </a>
+                Voice used for all dispatch call segments.
               </p>
             </div>
           )}
@@ -1231,32 +1269,49 @@ function DispatchSettings({ value, onChange, ttsConfig }: DispatchSettingsProps)
                     htmlFor="dispatch-officer-voice-elevenlabs"
                     className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300"
                   >
-                    Officer Voice ID{' '}
-                    <span className="font-normal text-gray-400 dark:text-gray-500">(male)</span>
+                    Officer Voice
                   </label>
-                  <input
+                  <select
                     id="dispatch-officer-voice-elevenlabs"
-                    type="text"
-                    value={value.officer_elevenlabs_voice ?? ''}
-                    onChange={(e) => update({ officer_elevenlabs_voice: e.target.value })}
-                    placeholder="ErXwobaYiN019PkySvjV"
+                    value={ELEVENLABS_OFFICER_PRESETS.some((p) => p.id === (value.officer_elevenlabs_voice ?? ''))
+                      ? (value.officer_elevenlabs_voice ?? '')
+                      : (value.officer_elevenlabs_voice ? '__custom__' : '')}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v === '__custom__') return;
+                      update({ officer_elevenlabs_voice: v });
+                    }}
                     className={cn(
-                      'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono',
+                      'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm',
                       'focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500',
                       'dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100',
-                      'placeholder:text-gray-400 dark:placeholder:text-gray-500',
                     )}
-                  />
+                  >
+                    <optgroup label="Police / Officer">
+                      {ELEVENLABS_OFFICER_PRESETS.map((p) => (
+                        <option key={p.id} value={p.id}>{p.label}</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Other">
+                      <option value="__custom__">Custom Voice ID...</option>
+                    </optgroup>
+                  </select>
+                  {(value.officer_elevenlabs_voice && !ELEVENLABS_OFFICER_PRESETS.some((p) => p.id === value.officer_elevenlabs_voice)) && (
+                    <input
+                      type="text"
+                      value={value.officer_elevenlabs_voice ?? ''}
+                      onChange={(e) => update({ officer_elevenlabs_voice: e.target.value })}
+                      placeholder="Paste ElevenLabs voice ID"
+                      className={cn(
+                        'mt-1.5 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono',
+                        'focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500',
+                        'dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100',
+                        'placeholder:text-gray-400 dark:placeholder:text-gray-500',
+                      )}
+                    />
+                  )}
                   <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">
-                    ElevenLabs voice ID for the officer. Default: Antoni (deep male).{' '}
-                    <a
-                      href="https://elevenlabs.io/voice-library"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-500 hover:underline dark:text-blue-400"
-                    >
-                      Browse voice library
-                    </a>
+                    Voice used for the responding officer segment.
                   </p>
                 </div>
               )}

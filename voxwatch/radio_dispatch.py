@@ -994,7 +994,7 @@ async def compose_dispatch_audio(
     elif is_elevenlabs:
         dispatcher_voice = (
             dispatch_cfg.get("dispatcher_elevenlabs_voice", "").strip()
-            or "EXAVITQu4vr4xnSDxMaL"  # Bella — professional female
+            or "46zEzba8Y8yQ0bVcv5O9"  # Steady Dispatcher — police female
         )
     else:
         dispatcher_voice = ""  # Not used for piper/espeak
