@@ -113,9 +113,10 @@ def _apply_defaults(config: dict) -> dict:
     # set explicitly in config.yaml or via environment variables.
     tts_cfg = config.setdefault("tts", {})
     # Accept both "provider" (core) and "engine" (dashboard) field names.
-    # If "engine" is set but "provider" is not, copy engine to provider
-    # so the factory always has a consistent key to read.
-    if "provider" not in tts_cfg and "engine" in tts_cfg:
+    # "engine" is what the dashboard UI writes; "provider" is what the TTS
+    # factory reads.  "engine" takes precedence when both are present because
+    # the dashboard is the most recent source of truth.
+    if "engine" in tts_cfg:
         tts_cfg["provider"] = tts_cfg["engine"]
     tts_cfg.setdefault("provider", "piper")
     tts_cfg.setdefault("fallback_chain", ["piper"])

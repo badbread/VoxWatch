@@ -103,6 +103,7 @@ class PreviewAPI:
         self._app.router.add_post("/api/preview/generate-intro", self._handle_generate_intro)
         self._app.router.add_post("/api/announce", self._handle_announce)
         self._app.router.add_get("/api/health", self._handle_health)
+        self._app.router.add_delete("/api/piper-voices/{model_name}", self._handle_delete_piper_voice)
 
         self._runner: web.AppRunner | None = None
 
@@ -111,7 +112,7 @@ class PreviewAPI:
     async def start(self, port: int = 8892) -> bool:
         """Bind the HTTP server and begin accepting requests.
 
-        Binds to ``0.0.0.0`` so the dashboard container can reach it.  The
+        Binds to ``127.0.0.1`` so only the local host can reach it.  Both
         method is non-fatal: any ``OSError`` (port conflict, permission denied)
         is caught, logged, and ``False`` is returned so the main service can
         continue without the preview API.
@@ -126,9 +127,9 @@ class PreviewAPI:
         try:
             self._runner = web.AppRunner(self._app, access_log=None)
             await self._runner.setup()
-            site = web.TCPSite(self._runner, "0.0.0.0", port)
+            site = web.TCPSite(self._runner, "127.0.0.1", port)
             await site.start()
-            logger.info("Preview API listening on 0.0.0.0:%d", port)
+            logger.info("Preview API listening on 127.0.0.1:%d", port)
             return True
         except OSError as exc:
             logger.error(
@@ -269,22 +270,34 @@ class PreviewAPI:
 
         # Determine which provider was actually used — may differ from what
         # was requested if the pipeline fell back (e.g. ElevenLabs → espeak).
-        actual_provider = preview_config.get("tts", {}).get("provider", "piper")
-        configured_provider = tts_override.get("provider", actual_provider)
+        configured_provider = tts_override.get(
+            "provider",
+            preview_config.get("tts", {}).get("provider", "piper"),
+        )
+        actual_provider = configured_provider
         used_fallback = "false"
         fallback_reason = ""
 
-        # Check if the pipeline silently switched providers during generation.
-        if hasattr(self._audio, "_tts_provider") and self._audio._tts_provider:
-            actual_provider = getattr(
-                self._audio._tts_provider, "name", actual_provider
-            )
-        # If the actual provider differs from what was configured, flag it.
-        if actual_provider != configured_provider:
-            used_fallback = "true"
-        # Capture the reason the primary provider failed (if any).
+        # The pipeline sets _last_fallback_reason when the primary provider
+        # failed and a fallback succeeded.  This is the authoritative signal
+        # for fallback detection — do NOT compare against _tts_provider.name
+        # because that reflects the service's warmed-up provider, not the
+        # preview's temporary provider override.
         if hasattr(self._audio, "_last_fallback_reason"):
             fallback_reason = self._audio._last_fallback_reason or ""
+        if fallback_reason:
+            used_fallback = "true"
+            # Extract the actual provider name from the result if available.
+            # The fallback chain's last successful provider wrote the file.
+            # We can infer it from the fallback_chain config.
+            chain = preview_config.get("tts", {}).get("fallback_chain", ["piper"])
+            if chain:
+                # The first chain entry that isn't the configured provider
+                # is likely what succeeded.
+                for name in chain:
+                    if name != configured_provider:
+                        actual_provider = name
+                        break
 
         try:
             with open(wav_path, "rb") as fh:
@@ -315,7 +328,9 @@ class PreviewAPI:
             "X-TTS-Fallback": used_fallback,
         }
         if fallback_reason:
-            headers["X-TTS-Fallback-Reason"] = fallback_reason
+            # Sanitize: HTTP headers cannot contain newlines or carriage returns.
+            safe_reason = fallback_reason.replace("\n", " ").replace("\r", "")
+            headers["X-TTS-Fallback-Reason"] = safe_reason[:500]
 
         return web.Response(
             body=wav_bytes,
@@ -875,6 +890,60 @@ class PreviewAPI:
             os.unlink(output_path)
         return None
 
+    async def _handle_delete_piper_voice(self, request: web.Request) -> web.Response:
+        """DELETE /api/piper-voices/{model_name} — Remove a downloaded piper voice.
+
+        Only deletes from /data/piper-voices/ (the auto-download cache).
+        Refuses to delete baked-in voices from /usr/share/piper-voices/.
+
+        Args:
+            request: aiohttp request with model_name path parameter.
+
+        Returns:
+            JSON response with ok/message fields.
+        """
+        import re
+
+        model_name = request.match_info.get("model_name", "")
+        if not re.match(r"^[a-zA-Z0-9_-]+$", model_name):
+            return web.json_response(
+                {"ok": False, "message": "Invalid model name."},
+                status=400,
+            )
+
+        # Refuse to delete baked-in voices.
+        builtin_path = f"/usr/share/piper-voices/{model_name}.onnx"
+        if os.path.exists(builtin_path):
+            return web.json_response(
+                {"ok": False, "message": "Cannot delete built-in voice."},
+                status=403,
+            )
+
+        download_dir = "/data/piper-voices"
+        onnx_path = os.path.join(download_dir, f"{model_name}.onnx")
+        json_path = os.path.join(download_dir, f"{model_name}.onnx.json")
+
+        if not os.path.exists(onnx_path):
+            return web.json_response(
+                {"ok": False, "message": f"Voice '{model_name}' not found."},
+                status=404,
+            )
+
+        try:
+            os.unlink(onnx_path)
+            if os.path.exists(json_path):
+                os.unlink(json_path)
+            logger.info("Deleted piper voice: %s", model_name)
+            return web.json_response(
+                {"ok": True, "message": f"Voice '{model_name}' deleted."},
+            )
+        except OSError as exc:
+            logger.error("Failed to delete piper voice '%s': %s", model_name, exc)
+            return web.json_response(
+                {"ok": False, "message": str(exc)},
+                status=500,
+            )
+
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _build_preview_config(self, tts_overrides: dict) -> dict:
@@ -899,12 +968,26 @@ class PreviewAPI:
         new_config = dict(self._config)
         new_tts = dict(self._config.get("tts", {}))
 
-        if "voice" in tts_overrides:
-            new_tts["voice"] = tts_overrides["voice"]
         if "provider" in tts_overrides:
             new_tts["provider"] = tts_overrides["provider"]
         if "speed" in tts_overrides:
             new_tts["speed"] = tts_overrides["speed"]
+        if "voice" in tts_overrides:
+            voice = tts_overrides["voice"]
+            new_tts["voice"] = voice
+            # Map the generic "voice" override to the provider-specific config
+            # key so each provider picks it up from the key it actually reads.
+            provider = new_tts.get("provider", "piper")
+            if provider == "piper":
+                new_tts["piper_model"] = voice
+            elif provider == "kokoro":
+                new_tts["kokoro_voice"] = voice
+            elif provider == "elevenlabs":
+                new_tts["elevenlabs_voice_id"] = voice
+            elif provider == "openai":
+                new_tts["openai_voice"] = voice
+            elif provider == "cartesia":
+                new_tts["cartesia_voice_id"] = voice
 
         new_config["tts"] = new_tts
         return new_config

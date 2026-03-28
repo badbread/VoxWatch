@@ -90,15 +90,14 @@ RUN useradd -r -s /bin/false dashboard
 RUN mkdir -p /data /config /tmp/voxwatch-wizard \
     && chown -R dashboard:dashboard /app /data /config /tmp/voxwatch-wizard
 
-# Note: Running as root for now because the /config volume is typically
-# owned by root on the host, and the dashboard needs write access to save
-# config.yaml.  For production hardening, configure the container to run
-# with the same UID that owns the config volume (e.g. --user 1026).
-# USER dashboard
+# Copy the entrypoint script that drops privileges after fixing bind-mount
+# ownership.  Same pattern as the VoxWatch service container.
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 # Health check — verifies the dashboard API is responding
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:33344/api/system/health')" || exit 1
 
-# Run with Uvicorn — production ASGI server
-CMD ["sh", "-c", "uvicorn backend.main:app --host 0.0.0.0 --port ${DASHBOARD_PORT}"]
+# Starts as root to fix bind-mount ownership, then drops to 'dashboard' user.
+ENTRYPOINT ["/entrypoint.sh"]

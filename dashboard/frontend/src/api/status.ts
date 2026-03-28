@@ -244,6 +244,38 @@ export async function generateIntroAudio(
   return { blob: response.data, generationTimeMs, saved };
 }
 
+// ---------------------------------------------------------------------------
+// Piper voice management API
+// ---------------------------------------------------------------------------
+
+/** Response shape for a single Piper voice from GET /api/audio/piper-voices. */
+export interface PiperVoiceInfo {
+  id: string;
+  label: string;
+  desc: string;
+  installed: boolean;
+  size_mb: number | null;
+  source: 'builtin' | 'downloaded' | 'available';
+}
+
+/** Full response from GET /api/audio/piper-voices. */
+export interface PiperVoiceListResponse {
+  voices: PiperVoiceInfo[];
+  builtin_dir: string;
+  download_dir: string;
+}
+
+/** Fetch installed and available Piper voice models. */
+export async function getPiperVoices(): Promise<PiperVoiceListResponse> {
+  const response = await apiClient.get<PiperVoiceListResponse>('/audio/piper-voices');
+  return response.data;
+}
+
+/** Delete a downloaded Piper voice model. */
+export async function deletePiperVoice(modelName: string): Promise<void> {
+  await apiClient.delete(`/audio/piper-voices/${encodeURIComponent(modelName)}`);
+}
+
 /** Result from uploadIntroAudio. */
 export interface UploadIntroResult {
   /** Whether the upload was accepted and written to disk. */

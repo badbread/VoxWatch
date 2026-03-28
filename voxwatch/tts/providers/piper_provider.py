@@ -24,6 +24,7 @@ import asyncio
 import logging
 import os
 import shutil
+import urllib.request
 
 from voxwatch.tts.base import TTSProvider, TTSProviderError, TTSResult
 
@@ -31,6 +32,56 @@ logger = logging.getLogger("voxwatch.tts.piper")
 
 # Maximum seconds to wait for piper before treating it as hung.
 _SUBPROCESS_TIMEOUT = 30
+
+# Directory where auto-downloaded piper models are cached.
+_DOWNLOAD_DIR = "/data/piper-voices"
+
+# Hugging Face base URL for piper voice models.
+_HF_BASE = "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0"
+
+# Community / custom voices hosted outside the rhasspy repository.
+# Maps model name → (onnx_url, json_url).
+_CUSTOM_VOICES: dict[str, tuple[str, str]] = {
+    "hal9000": (
+        "https://huggingface.co/campwill/HAL-9000-Piper-TTS/resolve/main/hal.onnx",
+        "https://huggingface.co/campwill/HAL-9000-Piper-TTS/resolve/main/hal.onnx.json",
+    ),
+}
+
+
+def _hf_url(model_name: str) -> tuple[str, str]:
+    """Build Hugging Face download URLs for a piper model.
+
+    Checks the custom voice registry first, then falls back to the standard
+    rhasspy/piper-voices repository URL pattern.
+
+    Args:
+        model_name: Piper model name like "en_US-lessac-medium" or "hal9000".
+
+    Returns:
+        Tuple of (onnx_url, json_url) for the model and its config file.
+
+    Raises:
+        ValueError: If the model name doesn't match the expected pattern.
+    """
+    # Check custom voice registry first.
+    if model_name in _CUSTOM_VOICES:
+        return _CUSTOM_VOICES[model_name]
+
+    # Standard rhasspy format: <lang>_<region>-<voice>-<quality>
+    parts = model_name.split("-")
+    if len(parts) < 3:
+        raise ValueError(f"Cannot parse model name: {model_name}")
+    lang_region = parts[0]        # e.g. "en_US"
+    voice = parts[1]              # e.g. "lessac"
+    quality = parts[2]            # e.g. "medium"
+    lang = lang_region.split("_")[0]  # e.g. "en"
+
+    base_path = f"{_HF_BASE}/{lang}/{lang_region}/{voice}/{quality}"
+    return (
+        f"{base_path}/{model_name}.onnx",
+        f"{base_path}/{model_name}.onnx.json",
+    )
 
 
 class PiperProvider(TTSProvider):
@@ -80,9 +131,14 @@ class PiperProvider(TTSProvider):
 
         Priority:
           1. If the value is already an absolute path that exists, use it.
-          2. PIPER_MODEL_PATH environment variable (set in Dockerfile).
-          3. /usr/share/piper-voices/<model>.onnx (standard install location).
-          4. Fall through to the raw value (piper's own path resolution).
+          2. /usr/share/piper-voices/<model>.onnx (baked into Docker image).
+          3. /data/piper-voices/<model>.onnx (auto-downloaded cache).
+          4. Auto-download from Hugging Face to /data/piper-voices/.
+          5. PIPER_MODEL_PATH env var (legacy fallback for default voice only).
+          6. Fall through to the raw value (piper's own path resolution).
+
+        PIPER_MODEL_PATH is intentionally checked LAST — it points to the
+        default baked-in model and must not override the user's voice selection.
 
         Args:
             model_name: Config value — either a bare name like
@@ -95,22 +151,88 @@ class PiperProvider(TTSProvider):
         if os.path.exists(model_name):
             return model_name
 
-        # Dockerfile bakes the model path into this env var.
-        env_path = os.environ.get("PIPER_MODEL_PATH", "")
-        if env_path and os.path.exists(env_path):
-            logger.debug("Using PIPER_MODEL_PATH: %s", env_path)
-            return env_path
-
-        # Standard install location used by some piper packaging.
+        # Standard install location (baked into Docker image).
         candidate = f"/usr/share/piper-voices/{model_name}.onnx"
         if os.path.exists(candidate):
-            logger.debug("Using standard voice path: %s", candidate)
+            logger.debug("Using baked-in voice: %s", candidate)
             return candidate
 
-        # Let piper handle its own model resolution (may work if model name
-        # is in its built-in lookup table).
+        # Check auto-download cache.
+        cached = os.path.join(_DOWNLOAD_DIR, f"{model_name}.onnx")
+        if os.path.exists(cached):
+            logger.debug("Using cached downloaded voice: %s", cached)
+            return cached
+
+        # Attempt auto-download from Hugging Face.
+        downloaded = self._download_model(model_name)
+        if downloaded:
+            return downloaded
+
+        # Legacy fallback: PIPER_MODEL_PATH env var (set in Dockerfile).
+        # Only used if nothing else matched — avoids overriding user selection.
+        env_path = os.environ.get("PIPER_MODEL_PATH", "")
+        if env_path and os.path.exists(env_path):
+            logger.debug("Using PIPER_MODEL_PATH fallback: %s", env_path)
+            return env_path
+
+        # Let piper handle its own model resolution.
         logger.debug("Model path not found locally, passing raw name to piper: %s", model_name)
         return model_name
+
+    @staticmethod
+    def _download_model(model_name: str) -> str | None:
+        """Download a piper voice model from Hugging Face.
+
+        Downloads both the .onnx model and its .onnx.json config file
+        to the persistent cache directory (/data/piper-voices/).
+
+        Args:
+            model_name: Piper model name like "en_US-lessac-medium".
+
+        Returns:
+            Path to the downloaded .onnx file, or None on failure.
+        """
+        try:
+            onnx_url, json_url = _hf_url(model_name)
+        except ValueError as exc:
+            logger.warning("Cannot auto-download model '%s': %s", model_name, exc)
+            return None
+
+        os.makedirs(_DOWNLOAD_DIR, exist_ok=True)
+        onnx_path = os.path.join(_DOWNLOAD_DIR, f"{model_name}.onnx")
+        json_path = os.path.join(_DOWNLOAD_DIR, f"{model_name}.onnx.json")
+
+        logger.info(
+            "Downloading piper voice '%s' from Hugging Face (first use)...",
+            model_name,
+        )
+
+        try:
+            # Download the .onnx.json config first (small, fast).
+            urllib.request.urlretrieve(json_url, json_path)
+            logger.debug("Downloaded model config: %s", json_path)
+
+            # Download the .onnx model (typically 20-60 MB).
+            urllib.request.urlretrieve(onnx_url, onnx_path)
+            logger.info(
+                "Downloaded piper voice '%s' (%.1f MB) to %s",
+                model_name,
+                os.path.getsize(onnx_path) / 1_048_576,
+                onnx_path,
+            )
+            return onnx_path
+        except Exception as exc:
+            logger.warning(
+                "Failed to download piper voice '%s': %s", model_name, exc
+            )
+            # Clean up partial downloads.
+            for path in (onnx_path, json_path):
+                if os.path.exists(path):
+                    try:
+                        os.unlink(path)
+                    except OSError:
+                        pass
+            return None
 
     @property
     def name(self) -> str:

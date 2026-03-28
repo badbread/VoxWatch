@@ -1,5 +1,5 @@
 # VoxWatch QA Baseline Manifest
-# Version: 1.3 | Date: 2026-03-27 | Coverage: All endpoints, components, and behaviors
+# Version: 1.4 | Date: 2026-03-27 | Coverage: All endpoints, components, and behaviors
 
 This manifest maps EVERY testable element in the VoxWatch system. If something
 is not listed here, it is not covered in QA. Update this document whenever the
@@ -531,7 +531,7 @@ On JSON parse failure: returns dict with all empty-string values (non-fatal).
 
 ---
 
-*Generated: 2026-03-27 | Version: 1.3 | Update on any API, component, or config change*
+*Generated: 2026-03-27 | Version: 1.4 | Update on any API, component, or config change*
 
 ---
 
@@ -667,4 +667,241 @@ Novelty category built-in personas were removed: tony_montana_dispatch, mafioso,
 None cause runtime errors, lint failures, or TypeScript errors. The "Fun / Novelty" toggle in the wizard renders but is visually empty.
 
 
-*Generated: 2026-03-27 | Version: 1.3 | Update on any API, component, or config change*
+
+---
+
+## Section 15: Piper Voice Auto-Download System (added 2026-03-27)
+
+### voxwatch/tts/providers/piper_provider.py -- model resolution
+
+PiperProvider._resolve_model(model_name) resolves a config value to the best
+available path using a fixed priority chain:
+
+| Priority | Condition | Action |
+|----------|-----------|--------|
+| 1 | os.path.exists(model_name) | Use as-is (absolute path) |
+| 2 | /usr/share/piper-voices/<model>.onnx exists | Use baked-in Docker image voice |
+| 3 | /data/piper-voices/<model>.onnx exists | Use previously auto-downloaded cache |
+| 4 | Neither found | Attempt auto-download from Hugging Face |
+| 5 | Download fails | Try PIPER_MODEL_PATH env var (legacy Dockerfile default) |
+| 6 | Env var missing/invalid | Pass raw name to piper binary for its own resolution |
+
+### Auto-download constants
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| _DOWNLOAD_DIR | /data/piper-voices | Persistent download cache directory |
+| _HF_BASE | https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0 | Standard Hugging Face base URL |
+| _SUBPROCESS_TIMEOUT | 30 seconds | Max time to wait for piper binary |
+
+### _CUSTOM_VOICES registry
+
+Maps non-standard model names to explicit (onnx_url, json_url) tuples. Checked
+before the standard rhasspy URL pattern in _hf_url(). Current entries:
+
+| Key | Repo | Description |
+|-----|------|-------------|
+| hal9000 | campwill/HAL-9000-Piper-TTS | Calm monotone AI voice |
+
+### _hf_url(model_name) behavior
+
+Checks _CUSTOM_VOICES first. For standard names, splits on "-" expecting at least 3
+parts: <lang_region>-<voice>-<quality>. Raises ValueError if parsing fails (prevents
+download attempt with garbage model name).
+
+### _download_model(model_name) behavior
+
+Downloads .onnx.json config first (small), then .onnx model (20-60 MB).
+On any exception: logs warning, removes partial files (both paths), returns None.
+On success: returns path to the downloaded .onnx file.
+
+---
+
+## Section 16: Piper Voice Management API (added 2026-03-27)
+
+### GET /api/audio/piper-voices
+
+Lists all known Piper voice models with installation status.
+
+- No request body required.
+- Response model: PiperVoiceListResponse { voices: list[PiperVoiceInfo] }
+- Scans /usr/share/piper-voices/ (builtin) and /data/piper-voices/ (downloaded).
+- Merges scan results with _PIPER_VOICE_INFO friendly-name registry (11 known voices).
+- Unknown .onnx files found on disk are included with id as label.
+- Missing directories return empty results without error.
+
+### PiperVoiceInfo fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| id | str | Model identifier (e.g. en_US-lessac-medium) |
+| label | str | Human-readable name (e.g. Lessac (Medium)) |
+| desc | str | Short description of voice character and quality |
+| installed | bool | True if .onnx file is present on disk |
+| size_mb | float or null | File size in MB; null when not installed |
+| source | str | builtin, downloaded, or available |
+
+### DELETE /api/audio/piper-voices/{model_name}
+
+Deletes a downloaded Piper voice model. Dashboard container mounts /data
+read-only, so the request is proxied to VoxWatch Preview API.
+
+| HTTP code | Condition |
+|-----------|-----------|
+| 200 | Deletion successful |
+| 400 | model_name contains characters outside ^[a-zA-Z0-9_-]+$ |
+| 403 | Model is builtin (in /usr/share/piper-voices/) |
+| 404 | Model not found in /data/piper-voices/ |
+| 503 | VoxWatch Preview API unreachable |
+
+Proxy target: VoxWatch Preview API DELETE /api/piper-voices/{model_name}.
+Both .onnx and .onnx.json files are deleted. Partial-delete is not possible
+(both files removed in one handler call).
+
+### VoxWatch Preview API -- DELETE /api/piper-voices/{model_name}
+
+Registered in preview_api.py at startup via app.router.add_delete().
+
+Validation:
+- model_name must match ^[a-zA-Z0-9_-]+$ (HTTP 400 otherwise)
+- Builtin check: if /usr/share/piper-voices/<model>.onnx exists -> HTTP 403
+- Not-found check: if /data/piper-voices/<model>.onnx not found -> HTTP 404
+- Deletes both <model>.onnx and <model>.onnx.json (suppresses OSError on json removal)
+
+---
+
+## Section 17: Preview Voice Override Mapping (added 2026-03-27)
+
+### voxwatch/preview_api.py -- _build_preview_config()
+
+When a generic voice override is supplied in the preview request body,
+_build_preview_config() maps it to the provider-specific config key that the
+TTS factory actually reads. This ensures the correct voice is used regardless
+of which provider is active.
+
+| Active provider | Config key written |
+|-----------------|--------------------|
+| piper | tts.piper_model |
+| kokoro | tts.kokoro_voice |
+| elevenlabs | tts.elevenlabs_voice_id |
+| openai | tts.openai_voice |
+| cartesia | tts.cartesia_voice_id |
+
+Provider resolved from new_tts.get("provider", "piper") after override merge.
+Mapping only applied when a voice key is present in the incoming override dict.
+
+---
+
+## Section 18: Kokoro Test Button (added 2026-03-27)
+
+### POST /api/audio/test-tts-provider -- kokoro provider
+
+Provider field value: kokoro. Host URL passed in the api_key request field
+(repurposed since Kokoro has no API key). Falls back to reading from config
+(tts.kokoro.host then tts.kokoro_host then http://localhost:8880).
+
+Probe sequence:
+1. GET {host}/voices (Kokoro native endpoint)
+2. If HTTP 404: GET {host}/v1/audio/voices (OpenAI-compatible wrapper)
+3. If both 404: return ok=False
+
+On success: returns ok=True with voice count.
+/voices returns {"voices": {"lang": [...]}}, flattened list count.
+/v1/audio/voices returns flat list, counted directly.
+
+### Frontend -- TtsConfigForm.tsx KokoroFields section
+
+TestApiAccessButton rendered for Kokoro with provider="kokoro" and
+apiKey=value.kokoro_host. Consistent with ElevenLabs, Cartesia, OpenAI,
+and Polly test buttons in the same form.
+
+---
+
+## Section 19: Fallback Reason Header Sanitization (added 2026-03-27)
+
+### voxwatch/preview_api.py -- X-TTS-Fallback-Reason sanitization
+
+Applied immediately before setting the response header. Three transforms:
+1. Replace all newline characters with a space.
+2. Remove all carriage return characters.
+3. Truncate to 500 characters maximum.
+
+Rationale: aiohttp rejects headers containing raw newlines or carriage returns,
+which would cause the response to fail rather than simply omit the reason.
+
+Code location: immediately after the if fallback_reason: check in _handle_preview.
+
+---
+
+## Section 20: Engine vs Provider Config Priority Fix (added 2026-03-27)
+
+### voxwatch/config.py -- _apply_defaults() engine/provider resolution
+
+Config fields: tts.engine (written by dashboard UI) vs tts.provider (read by TTS factory).
+
+Previous behavior: engine only copied to provider when provider was absent.
+Bug: if both keys existed, stale provider value won.
+
+Current behavior: engine ALWAYS overwrites provider when present.
+engine is the most-recent source of truth (set by dashboard on every save).
+
+    if "engine" in tts_cfg:
+        tts_cfg["provider"] = tts_cfg["engine"]
+    tts_cfg.setdefault("provider", "piper")
+
+Failure mode fixed: user switches kokoro -> piper in UI. Dashboard writes
+engine=piper but provider=kokoro from prior save persists. Without fix,
+factory starts Kokoro instead of Piper.
+
+---
+
+## Section 21: Stale Novelty Persona Reference Cleanup (added 2026-03-27)
+
+README.md and all docs/ files confirmed clean: no matches for tony_montana,
+mafioso, pirate_captain, british_butler, disappointed_parent, or novelty.
+
+Remaining artifacts in Python/TypeScript source files are documented in
+Section 14. They are comment/docstring artifacts with no runtime effect.
+No new stale references were introduced in this session.
+
+---
+
+## Section 22: Frontend PiperFields UI (added 2026-03-27)
+
+### dashboard/frontend/src/components/config/TtsConfigForm.tsx -- PiperFields
+
+Rendered when tts.engine === piper in the TTS config form.
+
+#### Voice dropdown
+
+- Populated from PIPER_VOICES static list (11 known voices including hal9000).
+- Install status fetched via GET /api/audio/piper-voices (React Query, staleTime: 30s).
+- Option suffix: checkmark (U+2713) when installed; (downloads on first use) when not.
+  No suffix shown until API data loads.
+- On change: writes to tts.piper_model.
+
+#### Auto-download info banner
+
+Blue info box below the dropdown. Text: Only the default voice (Lessac Medium)
+is pre-installed. Other voices download automatically on first preview (~20-60 MB each).
+
+#### Installed Voices section
+
+Bordered panel showing all voices where installed=true from the API response.
+
+| Column | Content |
+|--------|---------|
+| Label | Voice label in a code element |
+| Size | size_mb to 1 decimal place; only shown when not null |
+| Badge/action | green pre-installed badge for builtin; trash delete button for downloaded |
+
+Delete button:
+- Calls DELETE /api/audio/piper-voices/{id} via deletePiperVoice() API function.
+- Disabled while deleteMutation.isPending (prevents double-tap race).
+- On success: invalidates piper-voices React Query key to refresh install status.
+
+Empty state: No additional voices downloaded when installedVoices list is empty.
+
+---
+
+*Generated: 2026-03-27 | Version: 1.4 | Update on any API, component, or config change*

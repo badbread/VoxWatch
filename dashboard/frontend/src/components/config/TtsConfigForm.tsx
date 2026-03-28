@@ -26,12 +26,13 @@ import {
   CheckCircle2,
   AlertCircle,
   Loader2,
+  Trash2,
 } from 'lucide-react';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { errorForField } from '@/utils/validators';
 import { inputCls, Field } from '@/components/common/FormField';
 import { cn } from '@/utils/cn';
-import { previewAudio, testTtsProvider } from '@/api/status';
+import { previewAudio, testTtsProvider, getPiperVoices, deletePiperVoice } from '@/api/status';
 import { AudioPreview } from '@/components/common/AudioPreview';
 
 /** Context for sharing the active persona name with sub-components. */
@@ -257,6 +258,7 @@ const PIPER_VOICES = [
   { id: 'en_GB-alan-medium',         label: 'Alan (Medium)',    desc: 'British male. Formal tone.' },
   { id: 'en_GB-jenny_dioco-medium',  label: 'Jenny (Medium)',   desc: 'British female. Warm and clear.' },
   { id: 'en_GB-cori-medium',         label: 'Cori (Medium)',    desc: 'British female. Professional newsreader style.' },
+  { id: 'hal9000',                   label: 'HAL 9000',         desc: 'Calm, monotone AI voice. "I\'m sorry Dave, I\'m afraid I can\'t do that."' },
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -757,11 +759,16 @@ function KokoroFields({
           kokoro_speed: value.kokoro_speed ?? 1.0,
         }}
       />
+
+      <TestApiAccessButton
+        provider="kokoro"
+        {...(value.kokoro_host ? { apiKey: value.kokoro_host } : {})}
+      />
     </div>
   );
 }
 
-/** Piper fields: model name input, speed slider, info card about Docker rebuild. */
+/** Piper fields: model name input, speed slider, voice install status. */
 function PiperFields({
   value,
   set,
@@ -769,23 +776,62 @@ function PiperFields({
   value: TtsConfig;
   set: <K extends keyof TtsConfig>(k: K, v: TtsConfig[K]) => void;
 }) {
-  const [showVoices, setShowVoices] = useState(false);
+  const queryClient = useQueryClient();
   const currentVoice = PIPER_VOICES.find((v) => v.id === value.piper_model);
+
+  // Fetch installed / available Piper voices from the backend.
+  const { data: piperVoiceData } = useQuery({
+    queryKey: ['piper-voices'],
+    queryFn: getPiperVoices,
+    // Stale after 30 s — voices change rarely, no need to hammer the API.
+    staleTime: 30_000,
+  });
+
+  // Build a fast lookup: voice id → install info from the API response.
+  const installedById = new Map(
+    (piperVoiceData?.voices ?? []).map((v) => [v.id, v]),
+  );
+
+  // Mutation for deleting a downloaded voice model.
+  const deleteMutation = useMutation({
+    mutationFn: (modelName: string) => deletePiperVoice(modelName),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['piper-voices'] });
+    },
+  });
+
+  // Voices that are currently installed on disk (builtin or downloaded).
+  const installedVoices = (piperVoiceData?.voices ?? []).filter((v) => v.installed);
 
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
       <Field
         label="Voice Model"
-        hint="Enter the Piper model name used at build time."
+        hint={currentVoice ? `${currentVoice.desc}` : 'Select a Piper voice model.'}
         className="sm:col-span-2"
       >
-        <input
-          type="text"
+        <select
           value={value.piper_model}
           onChange={(e) => set('piper_model', e.target.value)}
-          placeholder="en_US-lessac-medium"
           className={inputCls(false)}
-        />
+        >
+          {PIPER_VOICES.map((voice) => {
+            const apiInfo = installedById.get(voice.id);
+            // Prefer API-provided install status; fall back to unknown when data
+            // hasn't loaded yet so the dropdown still shows all voices.
+            const isInstalled = apiInfo?.installed ?? false;
+            const suffix = piperVoiceData
+              ? isInstalled
+                ? ' \u2713'
+                : ' (downloads on first use)'
+              : '';
+            return (
+              <option key={voice.id} value={voice.id}>
+                {voice.label} — {voice.id}{suffix}
+              </option>
+            );
+          })}
+        </select>
       </Field>
 
       <div className="sm:col-span-2">
@@ -796,80 +842,67 @@ function PiperFields({
         />
       </div>
 
-      {/* Piper Docker rebuild info card */}
-      <div className="sm:col-span-2 rounded-xl border border-blue-200 bg-blue-50/50 dark:border-blue-800/50 dark:bg-blue-950/20">
+      {/* Info banner */}
+      <div className="sm:col-span-2 flex items-start gap-2 rounded-xl border border-blue-200 bg-blue-50/50 px-4 py-3 dark:border-blue-800/50 dark:bg-blue-950/20">
+        <p className="text-xs text-blue-700 dark:text-blue-400">
+          Only the default voice (Lessac Medium) is pre-installed. Other voices are
+          downloaded automatically on first preview (~20&ndash;60&nbsp;MB each).
+        </p>
+      </div>
+
+      {/* Downloaded voices section */}
+      <div className="sm:col-span-2 rounded-xl border border-gray-200 bg-gray-50/50 dark:border-gray-700/50 dark:bg-gray-800/20">
         <div className="px-4 py-3">
-          <p className="text-sm font-medium text-blue-900 dark:text-blue-200">
-            Current Voice: <span className="font-mono">{value.piper_model}</span>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+            Installed Voices
           </p>
-          {currentVoice && (
-            <p className="mt-0.5 text-xs text-blue-700 dark:text-blue-400">
-              {currentVoice.label} — {currentVoice.desc}
+
+          {installedVoices.length === 0 ? (
+            <p className="text-xs text-gray-400 dark:text-gray-500">
+              No additional voices downloaded
             </p>
-          )}
-          <p className="mt-2 text-xs text-blue-600 dark:text-blue-400">
-            Piper voice models are baked into the Docker image at build time. To change
-            the voice, update your{' '}
-            <code className="rounded bg-blue-100 px-1 py-0.5 font-mono text-blue-800 dark:bg-blue-900/50 dark:text-blue-200">
-              docker-compose.yml
-            </code>{' '}
-            build args and rebuild:
-          </p>
-          <pre className="mt-2 rounded-lg bg-gray-800 dark:bg-gray-900 p-3 text-xs text-green-400 overflow-x-auto">
-{`services:
-  voxwatch:
-    build:
-      args:
-        PIPER_VOICE: en_US-ryan-medium  # Change this
-    # Then rebuild:
-    # docker compose build && docker compose up -d`}
-          </pre>
-        </div>
+          ) : (
+            <ul className="space-y-1.5">
+              {installedVoices.map((v) => (
+                <li
+                  key={v.id}
+                  className="flex items-center justify-between gap-3 rounded-lg px-2.5 py-1.5 text-xs bg-transparent hover:bg-gray-100 dark:hover:bg-gray-700/30 transition-colors"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <code className="flex-shrink-0 font-mono text-gray-700 dark:text-gray-300">
+                      {v.label}
+                    </code>
+                    {v.size_mb !== null && (
+                      <span className="text-gray-400 dark:text-gray-500">
+                        {v.size_mb.toFixed(1)}&nbsp;MB
+                      </span>
+                    )}
+                  </div>
 
-        <button
-          type="button"
-          onClick={() => setShowVoices(!showVoices)}
-          className="flex w-full items-center justify-between border-t border-blue-200 px-4 py-2 text-xs font-medium text-blue-600 hover:bg-blue-100/50 dark:border-blue-800/50 dark:text-blue-400 dark:hover:bg-blue-950/30 transition-colors"
-        >
-          <span>Available voices ({PIPER_VOICES.length})</span>
-          {showVoices ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-        </button>
-
-        {showVoices && (
-          <div className="border-t border-blue-200 px-4 py-3 dark:border-blue-800/50 space-y-1.5">
-            {PIPER_VOICES.map((voice) => (
-              <div
-                key={voice.id}
-                className={cn(
-                  'flex items-start gap-2 rounded-lg px-2.5 py-1.5 text-xs',
-                  voice.id === value.piper_model
-                    ? 'bg-blue-100 dark:bg-blue-900/40'
-                    : 'bg-transparent',
-                )}
-              >
-                <code className={cn(
-                  'flex-shrink-0 font-mono',
-                  voice.id === value.piper_model
-                    ? 'font-bold text-blue-800 dark:text-blue-200'
-                    : 'text-gray-600 dark:text-gray-400',
-                )}>
-                  {voice.id}
-                </code>
-                <span className="text-gray-500 dark:text-gray-400">
-                  — {voice.desc}
-                  {'default' in voice && (
-                    <span className="ml-1 rounded bg-green-100 px-1 py-0.5 text-green-700 dark:bg-green-900/30 dark:text-green-400">
-                      default
+                  {v.source === 'builtin' ? (
+                    <span className="flex-shrink-0 rounded bg-green-100 px-1.5 py-0.5 text-green-700 dark:bg-green-900/30 dark:text-green-400">
+                      pre-installed
                     </span>
+                  ) : (
+                    <button
+                      type="button"
+                      title={`Delete ${v.label}`}
+                      disabled={deleteMutation.isPending}
+                      onClick={() => deleteMutation.mutate(v.id)}
+                      className="flex-shrink-0 rounded p-1 text-gray-400 hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/30 dark:hover:text-red-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {deleteMutation.isPending && deleteMutation.variables === v.id ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-3.5 w-3.5" />
+                      )}
+                    </button>
                   )}
-                </span>
-              </div>
-            ))}
-            <p className="mt-2 text-xs text-gray-400 dark:text-gray-500">
-              Full list at <span className="font-mono">github.com/rhasspy/piper</span>
-            </p>
-          </div>
-        )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </div>
 
       <TestVoiceButton
