@@ -319,32 +319,6 @@ DEFAULT_MESSAGES: dict[str, dict[str, str]] = {
         "escalation": "This street is being monitored. You have been identified.",
         "resolution": "Area clear.",
     },
-    # Fun/Novelty fallback defaults (AI generates the real lines for these)
-    "mafioso": {
-        "initial": "Hey pal. Wrong house.",
-        "escalation": "You still here? That's a bad move, buddy.",
-        "resolution": "Good choice.",
-    },
-    "tony_montana": {
-        "initial": "This is MY house. You wanna play rough?",
-        "escalation": "Say hello to my little friend. Get out.",
-        "resolution": "Smart move.",
-    },
-    "pirate_captain": {
-        "initial": "Arrr, ye scallywag. Walk the plank.",
-        "escalation": "Ye were warned, matey. Leave now.",
-        "resolution": "Fair winds to ye.",
-    },
-    "british_butler": {
-        "initial": "I'm afraid you are most unwelcome here, Sir.",
-        "escalation": "I must insist you leave immediately, or I shall be forced to call the constabulary.",
-        "resolution": "Quite right. Good day.",
-    },
-    "disappointed_parent": {
-        "initial": "Really? At this hour? You should know better.",
-        "escalation": "I am very disappointed. Leave before I call someone.",
-        "resolution": "Good. Now think about what you almost did.",
-    },
     "custom": {
         "initial": "You are being recorded. Please leave.",
         "escalation": "Leave the property now.",
@@ -495,42 +469,6 @@ RESPONSE_MODES: dict[str, str] = {
         "and that the activity has already been reported. "
         "Use firm community-authority language — the whole street is aware. "
         "One sentence, addressed directly to the subject. "
-    ),
-
-    # ── Fun / Novelty Modes ───────────────────────────────────────────────
-
-    "mafioso": (
-        "You are speaking as a tough Italian-American wiseguy watching security "
-        "cameras. Use a street-smart, intimidating but slightly humorous tone. "
-        "Address the person directly. Use phrases like 'Hey you', 'pal', 'buddy'. "
-        "Make it clear they have been spotted and should leave. "
-    ),
-
-    "tony_montana": (
-        "You are speaking as Tony Montana from Scarface. "
-        "Thick Cuban accent energy. Aggressive, dramatic, territorial. "
-        "This is YOUR property and nobody disrespects you. "
-        "Use phrases like 'Say hello to my little friend', 'You wanna play rough?', "
-        "'This is MY house'. Be over-the-top theatrical but make it clear "
-        "they picked the wrong house. "
-    ),
-
-    "pirate_captain": (
-        "You are speaking as a boisterous pirate captain. "
-        "Use pirate slang: 'Arrr', 'ye scallywag', 'walk the plank'. "
-        "Be threatening but theatrical. Make it entertaining but clear they should leave. "
-    ),
-
-    "british_butler": (
-        "You are speaking as a proper British butler with impeccable manners. "
-        "Be extremely polite but make it absolutely clear the person is unwelcome. "
-        "Use formal language, 'Sir' or 'Madam', and subtle passive-aggressive phrasing. "
-    ),
-
-    "disappointed_parent": (
-        "You are speaking as a disappointed parent who caught someone doing something "
-        "wrong. Use a guilt-tripping, sighing tone. 'Really? At this hour?' "
-        "Make them feel embarrassed rather than threatened. "
     ),
 
     "custom": "",  # Replaced at runtime by persona.custom_prompt from config.

@@ -109,13 +109,7 @@ const SITUATIONAL_MODES: ModeDef[] = [
   },
 ];
 
-const FUN_MODES: ModeDef[] = [
-  { id: 'mafioso', name: 'Italian Mafioso', emoji: '🤌', desc: 'Street-smart, intimidating with humor.', example: '"Hey, you — you think you can just walk up to my place like that?"' },
-  { id: 'tony_montana', name: 'Tony Montana', emoji: '🔫', desc: 'Scarface energy. Dramatic, territorial.', example: '"You picked the wrong house, my friend."' },
-  { id: 'pirate_captain', name: 'Pirate Captain', emoji: '🏴‍☠️', desc: 'Theatrical and threatening.', example: '"Arrr! What scallywag dares approach me vessel?"' },
-  { id: 'british_butler', name: 'British Butler', emoji: '🎩', desc: 'Impeccably polite, passive-aggressive.', example: '"I beg your pardon, but one does not simply approach the premises uninvited."' },
-  { id: 'disappointed_parent', name: 'Disappointed Parent', emoji: '😤', desc: 'Guilt-tripping and embarrassing.', example: '"Really? At this hour? I expected better from someone your age."' },
-];
+const FUN_MODES: ModeDef[] = [];
 
 const ALL_MODES = [...CORE_MODES, ...SITUATIONAL_MODES, ...FUN_MODES];
 

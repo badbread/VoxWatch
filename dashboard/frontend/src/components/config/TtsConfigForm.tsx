@@ -505,6 +505,9 @@ function TestVoiceButton({
         isLoading={previewMutation.isPending}
         error={previewError}
         generationTimeMs={previewMutation.data?.generationTimeMs}
+        {...(previewMutation.data?.fallbackUsed != null ? { fallbackUsed: previewMutation.data.fallbackUsed } : {})}
+        {...(previewMutation.data?.actualProvider ? { actualProvider: previewMutation.data.actualProvider } : {})}
+        configuredProvider={engine}
       />
 
       {/* Test Voice button — triggers synthesis; becomes "Test again" after success */}

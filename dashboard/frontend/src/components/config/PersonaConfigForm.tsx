@@ -171,44 +171,6 @@ const SITUATIONAL_MODES: ResponseModeDef[] = [
 /** Fun / Novelty modes — entertainment and character modes. */
 const FUN_MODES: ResponseModeDef[] = [
   {
-    id: 'mafioso',
-    name: 'Italian Mafioso',
-    emoji: '🤌',
-    desc: 'Street-smart wiseguy. Intimidating with humor.',
-    example:
-      '"Hey, you in the red hoodie — you think you can just walk up to my place like that?"',
-  },
-  {
-    id: 'tony_montana',
-    name: 'Tony Montana',
-    emoji: '🔫',
-    desc: 'Scarface energy. Dramatic, territorial, over-the-top.',
-    example:
-      '"You wanna play rough? Okay! I see you in the red hoodie — you picked the wrong house, my friend."',
-  },
-  {
-    id: 'pirate_captain',
-    name: 'Pirate Captain',
-    emoji: '🏴‍☠️',
-    desc: 'Theatrical and threatening. Arrr!',
-    example: '"Arrr! What scallywag dares approach me vessel? I see ye in yer red hoodie!"',
-  },
-  {
-    id: 'british_butler',
-    name: 'British Butler',
-    emoji: '🎩',
-    desc: 'Impeccably polite. Passive-aggressive perfection.',
-    example:
-      '"I beg your pardon, Sir, but one does not simply approach the premises uninvited."',
-  },
-  {
-    id: 'disappointed_parent',
-    name: 'Disappointed Parent',
-    emoji: '😤',
-    desc: 'Guilt-tripping. Makes them feel embarrassed.',
-    example: '"Really? At this hour? I expected better from someone your age."',
-  },
-  {
     id: 'custom',
     name: 'Custom',
     emoji: '✏️',
@@ -350,11 +312,6 @@ const PERSONA_VOICE_DEFAULTS: Record<string, ModeVoiceConfig> = {
   automated_surveillance: { kokoro_voice: 'af_kore',    openai_voice: 'nova' },
   guard_dog:              { kokoro_voice: 'am_adam',    openai_voice: 'onyx' },
   neighborhood_watch:     { kokoro_voice: 'af_sarah',   openai_voice: 'shimmer' },
-  mafioso:                { kokoro_voice: 'am_fenrir',  openai_voice: 'onyx' },
-  tony_montana:           { kokoro_voice: 'am_fenrir',  openai_voice: 'echo' },
-  pirate_captain:         { kokoro_voice: 'am_adam',    openai_voice: 'fable' },
-  british_butler:         { kokoro_voice: 'bm_george',  openai_voice: 'echo' },
-  disappointed_parent:    { kokoro_voice: 'af_nicole',  openai_voice: 'nova' },
 };
 
 // ---------------------------------------------------------------------------

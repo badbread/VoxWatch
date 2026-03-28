@@ -73,7 +73,6 @@ logger = logging.getLogger("voxwatch.radio_dispatch")
 DISPATCH_MODES: frozenset[str] = frozenset(
     {
         "police_dispatch",
-        "tony_montana_dispatch",
     }
 )
 
