@@ -68,9 +68,9 @@ Each stage only fires if the person is still detected (Frigate re-check). AI ada
 
 ## Response Modes
 
-Control not just *what* is said, but *how* it's said. 14 built-in response modes + custom mode.
+Control not just *what* is said, but *how* it's said. 10 built-in response modes + custom mode.
 
-### Professional
+### Core Modes
 
 | Mode | Style | Example |
 |------|-------|---------|
@@ -82,14 +82,13 @@ Control not just *what* is said, but *how* it's said. 14 built-in response modes
 | **automated_surveillance** | Neutral AI monitoring voice | *"Movement detected. Behavior flagged."* |
 | **standard** | Clear, authoritative default | *"Attention. You are being recorded. Leave immediately."* |
 
-### Situational
+### Advanced Modes
 
 | Mode | Use Case |
 |------|----------|
 | **guard_dog** | Imply dog threat. *"They haven't been fed yet."* |
 | **neighborhood_watch** | Community pressure. *"Neighbors have been alerted."* |
 | **silent_pressure** | Delayed, tension-building response |
-| **evidence_collection** | Emphasizes forensic evidence capture |
 
 ### Custom Mode
 

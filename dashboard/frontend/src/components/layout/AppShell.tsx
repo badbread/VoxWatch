@@ -114,7 +114,7 @@ export function AppShell() {
          */}
         <main
           id="main-content"
-          className="flex-1 overflow-y-auto px-4 py-6 pb-20 sm:px-6 md:pb-6 lg:px-8"
+          className="flex-1 overflow-y-auto px-4 py-6 pb-24 sm:px-6 md:pb-20 lg:px-8"
         >
           <Outlet />
         </main>

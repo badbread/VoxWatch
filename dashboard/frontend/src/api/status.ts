@@ -307,3 +307,41 @@ export async function uploadIntroAudio(file: File): Promise<UploadIntroResult> {
 
   return response.data;
 }
+
+// ── Detection Events ──────────────────────────────────────────────────────
+
+/** Full detection event from events.jsonl, returned by GET /api/status/events. */
+export interface DetectionEvent {
+  timestamp: string;
+  event_id: string;
+  camera: string;
+  score: number;
+  response_mode: string;
+  tts_message?: string | null;
+  escalation_ran: boolean;
+  escalation_description?: string | null;
+  escalation_message?: string | null;
+  initial_audio_success?: boolean | null;
+  escalation_audio_success?: boolean | null;
+  tts_provider?: string | null;
+  tts_voice?: string | null;
+  ai_provider?: string | null;
+  total_latency_ms?: number | null;
+}
+
+/**
+ * Fetch recent detection events with full pipeline details.
+ *
+ * Hits GET /api/status/events (the status router is mounted at /status so the
+ * full path is /api/status/events).
+ *
+ * @param limit   Maximum number of events to return (default 50).
+ * @param camera  Optional camera name filter.
+ * @returns       Array of DetectionEvent objects, newest-first.
+ */
+export async function getRecentEvents(limit = 50, camera?: string): Promise<DetectionEvent[]> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (camera) params.set('camera', camera);
+  const response = await apiClient.get<DetectionEvent[]>(`/status/events?${params}`);
+  return response.data;
+}

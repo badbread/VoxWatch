@@ -831,7 +831,9 @@ class VoxWatchService:
         # filled in as each stage completes and passed to append_event_log at
         # the bottom of this method.
         _initial_audio_success: bool | None = None
+        _tts_message: str | None = None
         _escalation_description: str | None = None
+        _escalation_message: str | None = None
         _escalation_audio_success: bool | None = None
         _escalation_ran: bool = False
 
@@ -917,7 +919,7 @@ class VoxWatchService:
         await warmup_task
 
         if initial_enabled:
-            initial_push_ok = await self._play_initial_response(
+            initial_push_ok, _tts_message = await self._play_initial_response(
                 camera_stream, mode_name, _active_mode_obj.voice,
             )
             _initial_audio_success = initial_push_ok
@@ -950,13 +952,14 @@ class VoxWatchService:
             ai_description: str | None = await ai_prep_task
             _escalation_description = ai_description
 
-            s_esc_description, s_esc_push_ok = await self._run_escalation(
+            s_esc_description, s_esc_push_ok, s_esc_message = await self._run_escalation(
                 event_id, camera_name, camera_stream, mode_name, ai_description,
                 _active_mode_obj.voice,
             )
             # Use the more detailed description if the escalation stage got one
             if s_esc_description:
                 _escalation_description = s_esc_description
+            _escalation_message = s_esc_message
             _escalation_audio_success = s_esc_push_ok
             if s_esc_push_ok:
                 record_audio_push(self._camera_stats, camera_name, s_esc_push_ok)
@@ -1003,16 +1006,44 @@ class VoxWatchService:
                 frigate_event_id=event_id,
             )
 
+        # ── Resolve enrichment fields for event log ────────────────────────
+        # TTS provider name — read from the live audio pipeline instance.
+        _tts_provider_name: str | None = None
+        if self._audio._tts_provider is not None:
+            try:
+                _tts_provider_name = self._audio._tts_provider.name
+            except Exception:
+                _tts_provider_name = "unknown"
+
+        # TTS voice — read from config; check provider-specific key first.
+        _tts_cfg = self.config.get("tts", {})
+        _tts_voice: str | None = _tts_cfg.get("voice") or _tts_cfg.get(
+            f"{_tts_provider_name}_voice" if _tts_provider_name else "voice"
+        )
+
+        # AI provider — use the primary provider from config; note if it erred.
+        _ai_provider: str | None = (
+            self.config.get("ai", {}).get("primary", {}).get("provider", "unknown")
+        )
+        _last_ai_err = get_last_ai_error()
+        if _last_ai_err:
+            _ai_provider = f"{_ai_provider} (failed: {_last_ai_err[:60]})"
+
         event_entry: dict[str, Any] = {
             "timestamp": detection_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "event_id": event_id,
             "camera": camera_name,
             "score": round(score, 4),
             "response_mode": mode_name,
+            "tts_message": _tts_message,
             "initial_audio_success": _initial_audio_success,
             "escalation_ran": _escalation_ran,
             "escalation_description": _escalation_description,
+            "escalation_message": _escalation_message,
             "escalation_audio_success": _escalation_audio_success,
+            "tts_provider": _tts_provider_name,
+            "tts_voice": _tts_voice,
+            "ai_provider": _ai_provider,
             # Legacy keys retained for dashboard / log consumers that read
             # the old field names (stage2_* / stage3_*).
             "stage2_description": _escalation_description,
@@ -1040,7 +1071,7 @@ class VoxWatchService:
         camera_stream: str,
         mode_name: str,
         voice_config: "VoiceConfig | None" = None,
-    ) -> bool:
+    ) -> tuple[bool, str | None]:
         """Play the mode's instant Initial Response message (0 s delay, 1 sentence).
 
         The Initial Response fires immediately after backchannel warmup.  It
@@ -1065,7 +1096,9 @@ class VoxWatchService:
                 the active ResponseMode.
 
         Returns:
-            True if the audio push succeeded, False otherwise.
+            Tuple of (push_success, initial_text).  ``push_success`` is True if
+            the audio push succeeded, False otherwise.  ``initial_text`` is the
+            rendered TTS string that was (or would have been) spoken.
         """
         from voxwatch.radio_dispatch import DISPATCH_MODES  # noqa: PLC0415
 
@@ -1097,9 +1130,10 @@ class VoxWatchService:
         logger.info(
             "Initial Response [%s]: '%s'", mode_name, initial_text
         )
-        return await self._audio.generate_and_push(
+        push_ok = await self._audio.generate_and_push(
             camera_stream, initial_text, "stage2", voice_config
         )
+        return push_ok, initial_text
 
     async def _run_escalation(
         self,
@@ -1109,7 +1143,7 @@ class VoxWatchService:
         mode_name: str,
         ai_description: str | None,
         voice_config: "VoiceConfig | None" = None,
-    ) -> tuple[str | None, bool]:
+    ) -> tuple[str | None, bool, str | None]:
         """Run the Escalation stage if the person is still present.
 
         The Escalation stage is the primary deterrent response.  It:
@@ -1135,10 +1169,13 @@ class VoxWatchService:
                 the correct voice is used for each persona.
 
         Returns:
-            A 2-tuple of (description_used, push_success).
-            ``description_used`` is the text that was inserted into the audio
-            (may be the mode default if AI failed), or None if escalation was
-            skipped.  ``push_success`` is True if the audio push succeeded.
+            A 3-tuple of (description_used, push_success, escalation_message).
+            ``description_used`` is the AI description text (may be the mode
+            default if AI failed), or None if escalation was skipped.
+            ``push_success`` is True if the audio push succeeded.
+            ``escalation_message`` is the exact TTS string that was rendered
+            and played (differs from description_used for non-dispatch modes
+            where a template wraps the AI description), or None if skipped.
         """
         stage3_cfg = self.config.get("stage3", {})
 
@@ -1160,13 +1197,13 @@ class VoxWatchService:
                 logger.error(
                     "Escalation: presence check error: %s — skipping.", exc
                 )
-                return None, False
+                return None, False, None
 
             if not still_present:
                 logger.info(
                     "Escalation: person no longer present on %s — skipping.", camera_name
                 )
-                return None, False
+                return None, False, None
 
             logger.info("Escalation: person confirmed still present.")
 
@@ -1182,7 +1219,9 @@ class VoxWatchService:
             push_ok = await self._play_dispatch_escalation(
                 camera_stream, ai_description
             )
-            return ai_description, push_ok
+            # For dispatch modes the message is the AI JSON string itself;
+            # individual spoken segments are assembled inside _play_dispatch_escalation.
+            return ai_description, push_ok, ai_description
 
         # Standard/non-dispatch mode: use AI description directly if present,
         # otherwise render the mode's stage3 fallback template with AI vars.
@@ -1256,7 +1295,10 @@ class VoxWatchService:
                         if audio_to_push not in (cadence_path, converted_path):
                             with contextlib.suppress(OSError):
                                 _os.remove(audio_to_push)
-                        return ai_description, push_ok
+                        # Natural cadence renders multiple phrases; log the
+                        # full phrase list joined as the escalation_message.
+                        cadence_text = " ".join(full_phrases)
+                        return ai_description, push_ok, cadence_text
                 logger.warning(
                     "Escalation [%s]: natural cadence failed — falling back to flat TTS",
                     mode_name,
@@ -1272,7 +1314,7 @@ class VoxWatchService:
         push_ok = await self._audio.generate_and_push(
             camera_stream, escalation_message, "stage3", voice_config
         )
-        return ai_description, push_ok
+        return ai_description, push_ok, escalation_message
 
     async def _run_stage3_analysis(
         self,
@@ -1546,16 +1588,19 @@ class VoxWatchService:
             camera_stream: go2rtc stream name for audio output.
 
         Returns:
-            A 2-tuple of (ai_description, push_success).
+            A 2-tuple of (ai_description, push_success).  The third element
+            (escalation_message) from ``_run_escalation`` is intentionally
+            dropped to preserve the original signature.
         """
         mode_name, _ = _get_active_mode(self.config)
-        return await self._run_escalation(
+        description, push_ok, _ = await self._run_escalation(
             event_id=event_id,
             camera_name=camera_name,
             camera_stream=camera_stream,
             mode_name=mode_name,
             ai_description=None,  # will trigger fresh behavioral analysis
         )
+        return description, push_ok
 
     # ── Dashboard output — status file ────────────────────────────────────────
 

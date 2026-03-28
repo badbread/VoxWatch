@@ -1,5 +1,5 @@
 # VoxWatch QA Baseline Manifest
-# Version: 1.4 | Date: 2026-03-27 | Coverage: All endpoints, components, and behaviors
+# Version: 1.5 | Date: 2026-03-27 | Coverage: All endpoints, components, and behaviors
 
 This manifest maps EVERY testable element in the VoxWatch system. If something
 is not listed here, it is not covered in QA. Update this document whenever the
@@ -53,6 +53,23 @@ codebase changes.
 - Response: success, camera, duration_ms, error
 - Errors: 400 (missing camera/message, message exceeds 1000 chars)
 
+### GET /api/audio/piper-voices
+- List all known Piper voice models with installation status
+- Response model: PiperVoiceListResponse { voices: list[PiperVoiceInfo], builtin_dir: str, downloaded_dir: str }
+- No auth required beyond standard /api/* Bearer token
+
+### DELETE /api/audio/piper-voices/{model_name}
+- Delete a downloaded Piper voice from /data/piper-voices/
+- Proxies to VoxWatch Preview API (dashboard /data mount is read-only)
+- Errors: 400 (bad name), 403 (builtin), 404 (not found), 503 (Preview API down)
+
+### POST /api/audio/test-tts-provider
+- Validate cloud/local TTS provider credentials; no audio generated
+- Request: provider (str), api_key (optional str)
+- Providers: elevenlabs (GET /v1/user), openai (GET /v1/models), cartesia (GET /voices), kokoro (GET /voices or /v1/audio/voices)
+- Kokoro: api_key field repurposed to send host URL; falls back to config
+- Always returns HTTP 200; ok field indicates pass/fail
+
 ### GET /api/cameras
 - List all cameras (config + Frigate + go2rtc merged)
 - Response: array of CameraStatus
@@ -88,6 +105,13 @@ codebase changes.
 
 ### GET /api/status
 - Full system status: Frigate + go2rtc + cameras + last events
+- Response includes voxwatch: VoxWatchServiceStatus field (read from /data/status.json)
+
+### GET /api/status/events
+- Return recent detection events from events.jsonl with full pipeline details
+- Query params: limit (int 1-200, default 50), camera (string, optional filter)
+- Response model: list[DetectionEvent] sorted newest-first
+- Reads EVENTS_FILE; returns [] on FileNotFoundError; skips malformed JSON lines
 
 ### GET /api/system/health
 - Fast in-process check (no outbound requests)
@@ -531,7 +555,7 @@ On JSON parse failure: returns dict with all empty-string values (non-fatal).
 
 ---
 
-*Generated: 2026-03-27 | Version: 1.4 | Update on any API, component, or config change*
+*Generated: 2026-03-27 | Version: 1.5 | Update on any API, component, or config change*
 
 ---
 
@@ -608,8 +632,12 @@ New response headers forwarded by the preview endpoint:
 
 | Header | Value | Meaning |
 |--------|-------|---------|
+| X-TTS-Fallback | "true" or "false" | Set by VoxWatch Preview API and forwarded by dashboard. "true" when any fallback provider was used |
 | X-TTS-Fallback-Reason | error string | Why primary TTS failed; only present when fallback was used |
-| X-VoxWatch-Proxy | "proxied" or "local-fallback" | "proxied" = forwarded to VoxWatch Preview API; "local-fallback" = VoxWatch unreachable, dashboard synthesized locally |
+| X-TTS-Provider | provider name | Which TTS provider actually generated audio |
+| X-TTS-Configured | provider name | Which TTS provider was requested/configured |
+| X-VoxWatch-Proxy | "proxied" or "local-fallback" | Set only by dashboard audio.py. "proxied" = forwarded to VoxWatch Preview API; "local-fallback" = VoxWatch unreachable, dashboard synthesized locally |
+| X-Generation-Time-Ms | integer string | Audio synthesis time in milliseconds |
 
 Forwarding chain: voxwatch/preview_api.py sets X-TTS-Fallback-Reason -> dashboard audio.py forwards it -> browser reads it.
 
@@ -724,7 +752,7 @@ On success: returns path to the downloaded .onnx file.
 Lists all known Piper voice models with installation status.
 
 - No request body required.
-- Response model: PiperVoiceListResponse { voices: list[PiperVoiceInfo] }
+- Response model: PiperVoiceListResponse { voices: list[PiperVoiceInfo], builtin_dir: str, downloaded_dir: str }
 - Scans /usr/share/piper-voices/ (builtin) and /data/piper-voices/ (downloaded).
 - Merges scan results with _PIPER_VOICE_INFO friendly-name registry (11 known voices).
 - Unknown .onnx files found on disk are included with id as label.
@@ -904,4 +932,161 @@ Empty state: No additional voices downloaded when installedVoices list is empty.
 
 ---
 
-*Generated: 2026-03-27 | Version: 1.4 | Update on any API, component, or config change*
+*Generated: 2026-03-27 | Version: 1.5 | Update on any API, component, or config change*
+
+---
+
+## Section 23: QA Audit Log (2026-03-27 v1.5 full audit)
+
+This section records all findings from the comprehensive v1.5 baseline audit
+conducted against the full codebase. Classifications: ADDED (new coverage not
+previously documented), CORRECTED (inaccuracy fixed), CONFIRMED (verified
+accurate against source, no change required).
+
+### Build Verification Results
+
+| Check | Result |
+|-------|--------|
+| python -m ruff check voxwatch/ | PASS -- All checks passed, zero lint errors |
+| cd dashboard/frontend && npx tsc --noEmit | PASS -- Zero TypeScript type errors |
+
+---
+
+### Section 1 Audit Findings
+
+**Three endpoints existed in code but were absent from the Section 1 endpoint list.**
+All three have now been inserted above GET /api/cameras.
+
+| Endpoint | Status | File | Line |
+|----------|--------|------|------|
+| GET /api/status/events | ADDED | dashboard/backend/routers/status.py | 311 |
+| GET /api/audio/piper-voices | ADDED | dashboard/backend/routers/audio.py | 1990 |
+| DELETE /api/audio/piper-voices/{model_name} | ADDED | dashboard/backend/routers/audio.py | 2096 |
+| POST /api/audio/test-tts-provider | ADDED | dashboard/backend/routers/audio.py | 1613 |
+
+Note: POST /api/system/test-tts (system.py line 382) is a different endpoint
+from POST /api/audio/test-tts-provider (audio.py line 1613). The former was
+already documented; the latter was missing from Section 1.
+
+GET /api/status description updated to note that the response now includes a
+`voxwatch: VoxWatchServiceStatus` field (populated from /data/status.json).
+
+---
+
+### Section 13 Audit Findings
+
+**Response headers table was incomplete.**
+
+The original table listed only X-TTS-Fallback-Reason and X-VoxWatch-Proxy.
+Four additional headers are sent on every successful preview response and are
+now documented.
+
+Corrected table covers all six headers:
+
+| Header | Set by | Value |
+|--------|--------|-------|
+| X-TTS-Fallback | preview_api.py (forwarded by dashboard) | "true" or "false" |
+| X-TTS-Fallback-Reason | preview_api.py (forwarded by dashboard) | error string or absent |
+| X-TTS-Provider | preview_api.py (forwarded by dashboard) | provider name that ran |
+| X-TTS-Configured | preview_api.py (forwarded by dashboard) | provider name requested |
+| X-VoxWatch-Proxy | dashboard audio.py only | "proxied" or "local-fallback" |
+| X-Generation-Time-Ms | preview_api.py (forwarded by dashboard) | integer ms string |
+
+Key distinction: X-TTS-Fallback is set by preview_api.py and forwarded.
+X-VoxWatch-Proxy is only added by dashboard audio.py -- preview_api.py never
+sets it. This header marks whether the dashboard proxied or synthesized locally.
+
+---
+
+### Section 16 Audit Findings
+
+**PiperVoiceListResponse model was documented incompletely.**
+
+Original: PiperVoiceListResponse { voices: list[PiperVoiceInfo] }
+Actual (audio.py line 1976): also includes builtin_dir: str and downloaded_dir: str
+
+Both are required fields (no default). builtin_dir is always "/usr/share/piper-voices"
+and downloaded_dir is always "/data/piper-voices" in normal deployments.
+
+This correction has been applied in both Section 1 and Section 16.
+
+_PIPER_VOICE_INFO count confirmed as 11 entries (verified at audio.py line 1877).
+
+---
+
+### All Other Sections: Confirmed Accurate
+
+The following items were verified against source code and found accurate.
+No changes were required.
+
+**Section 14 (Novelty Persona Removal)**
+- audio.py _DISPATCH_MODES = frozenset({"police_dispatch"}) confirmed at line 1010.
+  This is a local copy independent of radio_dispatch.py DISPATCH_MODES.
+- radio_dispatch.py DISPATCH_MODES confirmed at line 72. DISPATCH_PERSONAS is alias.
+
+**Section 15 (Piper Auto-Download)**
+- 6-step _resolve_model priority chain confirmed in piper_provider.py lines 129-180.
+- _CUSTOM_VOICES with hal9000 confirmed at piper_provider.py line 44.
+- _DOWNLOAD_DIR=/data/piper-voices, _HF_BASE URL, _SUBPROCESS_TIMEOUT=30 all confirmed.
+
+**Section 17 (Preview Voice Override Mapping)**
+- _build_preview_config voice-to-provider mapping confirmed at preview_api.py lines 968-983.
+- Five mappings: piper->piper_model, kokoro->kokoro_voice, elevenlabs->elevenlabs_voice_id,
+  openai->openai_voice, cartesia->cartesia_voice_id.
+
+**Section 18 (Kokoro Test Button)**
+- Two-endpoint probe sequence confirmed at audio.py lines 1786-1823.
+- Host resolution order confirmed: request.api_key -> tts.kokoro.host ->
+  tts.kokoro_host -> http://localhost:8880.
+
+**Section 19 (Fallback Reason Header Sanitization)**
+- Three transforms confirmed at preview_api.py lines 332-333:
+  replace("\n", " "), replace("\r", ""), [:500].
+
+**Section 20 (Engine vs Provider Priority Fix)**
+- _apply_defaults unconditional assignment confirmed at voxwatch/config.py lines 119-121.
+
+**VoxWatch Service Behaviors**
+- _play_initial_response: returns tuple[bool, str | None] (voxwatch_service.py:1074).
+- _run_escalation: returns tuple[str | None, bool, str | None] (line 1146).
+- Enriched event log fields (tts_message, escalation_message, tts_provider,
+  tts_voice, ai_provider) confirmed at lines 1038-1046.
+- get_last_ai_error() + _last_ai_error module var confirmed at ai_vision.py lines 97-117.
+
+**Audio Pipeline Behaviors**
+- set_error_publisher / _publish_pipeline_error confirmed at audio_pipeline.py lines 257/261.
+- Error types: tts_failed, audio_conversion_failed, audio_push_failed, go2rtc_sender_leak.
+- _last_fallback_reason, _tts_provider_status, _tts_provider_error, _sender_counts
+  confirmed as instance attributes at lines 143-164.
+- generate_and_push persona null guard: double-null pattern at lines 1208-1209.
+  cfg = self.config or {} then (cfg.get("persona") or {}).get("name", "standard").
+
+**Radio Dispatch Behaviors**
+- _generate_chatter_tts uses dispatcher voice confirmed at radio_dispatch.py line 1687.
+  Builds provider-specific config copy before calling audio_pipeline.generate_tts().
+
+**Security**
+- dashboard/entrypoint.sh drops to "dashboard" user (su-exec pattern).
+- entrypoint.sh drops to "voxwatch" user.
+- Preview API binds to 127.0.0.1 confirmed at preview_api.py line 130.
+- espeak -- sentinel confirmed at espeak_provider.py generate() method.
+- TTS input sanitization _sanitize_tts_input() confirmed at audio_pipeline.py line 69.
+- Piper model name _validate_model_name() confirmed at audio.py line 1898.
+
+**Frontend Components**
+- RecentActivity.tsx: clickable accordion, renders tts_message/escalation_message/
+  tts_provider/ai_provider. Polls /api/status/events every 15s.
+- PiperFields: React Query staleTime 30s, checkmark when installed, delete
+  mutation invalidates piper-voices cache, disabled while isPending.
+- PersonaConfigForm: dispatch persona has dispatcher_voice (kokoro),
+  dispatcher_openai_voice, dispatcher_elevenlabs_voice. Non-dispatch personas
+  have no voice override fields.
+- AudioPreview: fallbackReason prop (line 86), proxyFallback prop (line 93),
+  playbackError useState (line 131). All render correctly.
+- TestAudioButton: amber state (border-amber-500 + AlertTriangle) on isSuccess.
+- ConfigSaveBar: change-review panel at bottom-28 mobile / bottom-14 md+.
+  AppShell content area uses pb-24 mobile / md:pb-20.
+
+---
+
+*Generated: 2026-03-27 | Version: 1.5 | Full audit against codebase*

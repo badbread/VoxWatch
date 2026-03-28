@@ -20,11 +20,12 @@ import os
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from backend import config as cfg
 from backend.models.status_models import (
     CameraStatus,
+    DetectionEvent,
     FrigateStatus,
     Go2rtcStatus,
     SystemStatus,
@@ -305,3 +306,66 @@ async def _cameras_merged(
             cam.backchannel_codecs = bc.get("codecs", [])
 
     return sorted(by_name.values(), key=lambda c: c.name)
+
+
+@router.get(
+    "/events",
+    response_model=list[DetectionEvent],
+    summary="Get recent detection events",
+    description="Returns recent detection events from events.jsonl with full pipeline details.",
+)
+async def get_events(
+    limit: int = Query(default=50, ge=1, le=200, description="Max events to return"),
+    camera: str | None = Query(default=None, description="Filter by camera name"),
+) -> list[DetectionEvent]:
+    """Return recent detection events from events.jsonl.
+
+    Reads the events log file and returns the most recent entries, newest
+    first.  Older events that predate the enriched-logging fields will still
+    be returned — missing fields are coerced to their Pydantic defaults.
+
+    Args:
+        limit: Maximum number of events to return (1–200, default 50).
+        camera: If set, only return events for this camera name.
+
+    Returns:
+        List of DetectionEvent objects sorted newest-first.
+    """
+    events_path = cfg.EVENTS_FILE
+
+    try:
+        with open(events_path, encoding="utf-8") as fh:
+            lines = fh.readlines()
+    except FileNotFoundError:
+        return []
+    except OSError as exc:
+        logger.warning("Could not read events file: %s", exc)
+        return []
+
+    # Parse all lines, skipping malformed JSON, then apply camera filter.
+    parsed: list[dict[str, Any]] = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            parsed.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+
+    if camera:
+        parsed = [ev for ev in parsed if ev.get("camera") == camera]
+
+    # Take the last `limit` entries (most recent) and reverse for newest-first.
+    recent = parsed[-limit:]
+    recent.reverse()
+
+    events: list[DetectionEvent] = []
+    for ev in recent:
+        try:
+            events.append(DetectionEvent(**ev))
+        except Exception as exc:
+            # Log and skip any event that fails Pydantic validation (e.g. corrupt data).
+            logger.debug("Skipping malformed event entry: %s — %s", ev.get("timestamp"), exc)
+
+    return events

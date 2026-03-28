@@ -774,20 +774,13 @@ class PreviewAPI:
             segment_dispatch_message,
         )
 
-        # Choose dispatch segments: caller text gets wrapped in a minimal JSON
-        # so segment_dispatch_message can build a proper dispatch call from it.
-        # Falling back to the sample AI JSON gives the most realistic preview.
-        if custom_message:
-            # Wrap the caller's custom text as the "description" field so it
-            # appears in segment 2 ("Suspect described as …").  The location
-            # and count fields use generic defaults.
-            ai_json = json.dumps({
-                "suspect_count": "one",
-                "description": custom_message,
-                "location": "near the front entrance",
-            })
-        else:
-            ai_json = _SAMPLE_DISPATCH_AI
+        # Always use the sample AI JSON for dispatch previews.  The frontend
+        # sends the persona example text as custom_message, but that text is a
+        # display-only sentence — not structured AI JSON.  Stuffing it into the
+        # description field produced nonsensical dispatch output ("Suspect
+        # described as... All units, 10-97 at...").  The sample JSON gives a
+        # realistic 3-segment dispatch with proper suspect description.
+        ai_json = _SAMPLE_DISPATCH_AI
 
         segments = segment_dispatch_message(ai_json, stage="stage2", config=config)
         if not segments:

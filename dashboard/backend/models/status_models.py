@@ -78,6 +78,44 @@ class CameraStatus(BaseModel):
     )
 
 
+# ── Detection Event ───────────────────────────────────────────────────────────
+
+class DetectionEvent(BaseModel):
+    """Full details of a single detection event from events.jsonl.
+
+    Fields map directly to keys written by ``append_event_log`` in
+    ``voxwatch_service.py``.  Optional fields are ``None`` when absent so
+    that older events (recorded before enriched logging was added) can still
+    be parsed without errors.
+    """
+
+    timestamp: str = Field(description="ISO 8601 timestamp of detection")
+    event_id: str = Field(default="", description="Frigate event ID")
+    camera: str = Field(description="Camera name")
+    score: float = Field(default=0.0, description="Detection confidence score (0-1)")
+    response_mode: str = Field(default="standard", description="Response mode/persona used")
+    tts_message: str | None = Field(default=None, description="Initial TTS message spoken")
+    escalation_ran: bool = Field(default=False, description="Whether escalation stage fired")
+    escalation_description: str | None = Field(
+        default=None, description="AI-generated person description"
+    )
+    escalation_message: str | None = Field(
+        default=None, description="Escalation TTS message"
+    )
+    initial_audio_success: bool | None = Field(
+        default=None, description="Whether initial audio pushed successfully"
+    )
+    escalation_audio_success: bool | None = Field(
+        default=None, description="Whether escalation audio pushed"
+    )
+    tts_provider: str | None = Field(default=None, description="TTS provider that generated audio")
+    tts_voice: str | None = Field(default=None, description="TTS voice used")
+    ai_provider: str | None = Field(default=None, description="AI vision provider used")
+    total_latency_ms: int | None = Field(
+        default=None, description="Total pipeline latency in ms"
+    )
+
+
 # ── External Service Status ───────────────────────────────────────────────────
 
 class FrigateStatus(BaseModel):

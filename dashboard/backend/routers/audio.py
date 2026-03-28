@@ -375,10 +375,10 @@ async def announce(request: AnnounceRequest) -> AnnounceResponse:
         payload["tone"] = request.tone
 
     # Resolve the VoxWatch service preview API URL.
+    # Uses 127.0.0.1 because the Preview API binds to localhost only (security).
     cfg = await config_service.get_config()
-    go2rtc_host = cfg.get("go2rtc", {}).get("host", "localhost")
     preview_port = cfg.get("preview_api_port", 8892)
-    announce_url = f"http://{go2rtc_host}:{preview_port}/api/announce"
+    announce_url = f"http://127.0.0.1:{preview_port}/api/announce"
 
     try:
         async with aiohttp.ClientSession() as session:
@@ -1015,22 +1015,21 @@ _VOXWATCH_PROXY_TIMEOUT = 60.0
 
 
 async def _get_voxwatch_preview_url() -> str:
-    """Build the VoxWatch Preview API URL from saved config.
+    """Build the VoxWatch Preview API URL.
 
-    Reads ``go2rtc.host`` for the hostname (VoxWatch and go2rtc typically run
-    on the same host) and ``preview_api_port`` for the port (default 8892).
+    The Preview API binds to 127.0.0.1 for security (not externally
+    accessible).  Both containers use host networking, so localhost
+    is the correct address for inter-container communication.
 
     Returns:
-        Full URL string, e.g. ``"http://192.168.1.10:8892/api/preview"``.
+        Full URL string, e.g. ``"http://127.0.0.1:8892/api/preview"``.
     """
     try:
         cfg = await config_service.get_config()
-        host: str = cfg.get("go2rtc", {}).get("host", "localhost")
         port: int = int(cfg.get("preview_api_port", 8892))
     except Exception:
-        host = "localhost"
         port = 8892
-    return f"http://{host}:{port}/api/preview"
+    return f"http://127.0.0.1:{port}/api/preview"
 
 
 async def _proxy_dispatch_preview(

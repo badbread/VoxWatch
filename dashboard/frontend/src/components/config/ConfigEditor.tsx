@@ -162,7 +162,7 @@ export function ConfigEditor() {
         {/* Form panel */}
         <div className="min-w-0 flex-1">
           <ErrorBoundary>
-            <Card title={activeTabDef?.label} className="pb-20 sm:pb-6">
+            <Card title={activeTabDef?.label}>
               {/* Services: Frigate + go2rtc */}
               {activeTab === 'services' && (
                 <div className="space-y-6">

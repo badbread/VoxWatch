@@ -1693,9 +1693,9 @@ async def _generate_chatter_tts(
     """Generate TTS for a random chatter snippet using the dispatcher voice.
 
     The chatter is background radio traffic heard before the main dispatch
-    call begins.  It should use the **same dispatcher voice** so it sounds
-    like the same channel / same person handling multiple calls — which is
-    how real dispatch radio works.
+    call begins.  It uses the **dispatcher voice** (not the global TTS voice)
+    so it sounds like the same channel / same person handling multiple calls —
+    which is how real dispatch radio works.
 
     The officer voice is reserved exclusively for the officer acknowledgment
     segment at the end of the dispatch sequence.
@@ -1709,14 +1709,42 @@ async def _generate_chatter_tts(
     Returns:
         True if TTS was generated successfully, False otherwise.
     """
-    # Use the dispatcher voice for chatter — same voice as the main dispatch
-    # segments.  This is just the standard TTS pipeline voice which is already
-    # configured as the dispatcher voice.
+    # Build a dispatcher-voice config so the chatter uses the same voice as
+    # the main dispatch segments, not the user's global TTS voice.
+    tts_cfg = config.get("tts", {})
+    dispatch_cfg = config.get("response_mode", config.get("persona", {})).get("dispatch", {})
+    provider = tts_cfg.get("provider", tts_cfg.get("engine", "piper"))
+
+    disp_config = dict(config)
+    disp_tts = dict(tts_cfg)
+
+    if provider == "kokoro":
+        voice = dispatch_cfg.get("dispatcher_voice", "").strip() or "af_bella"
+        kokoro = dict(disp_tts.get("kokoro", {}))
+        kokoro["voice"] = voice
+        disp_tts["kokoro"] = kokoro
+    elif provider == "openai":
+        voice = dispatch_cfg.get("dispatcher_openai_voice", "").strip() or "nova"
+        openai_sec = dict(disp_tts.get("openai", {}))
+        openai_sec["voice"] = voice
+        disp_tts["openai"] = openai_sec
+    elif provider == "elevenlabs":
+        voice = dispatch_cfg.get("dispatcher_elevenlabs_voice", "").strip() or "46zEzba8Y8yQ0bVcv5O9"
+        el_sec = dict(disp_tts.get("elevenlabs", {}))
+        el_sec["voice_id"] = voice
+        disp_tts["elevenlabs"] = el_sec
+
+    disp_config["tts"] = disp_tts
+
+    original_config = audio_pipeline.config
     try:
+        audio_pipeline.config = disp_config
         return await audio_pipeline.generate_tts(text, output_path)
     except Exception as exc:
         logger.debug("radio_dispatch: chatter TTS failed: %s", exc)
         return False
+    finally:
+        audio_pipeline.config = original_config
 
 
 async def _pitch_shift_down(

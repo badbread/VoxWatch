@@ -100,7 +100,7 @@ const CORE_MODES: ResponseModeDef[] = [
     emoji: '🚔',
     desc: 'Realistic dispatch radio. Flagship mode.',
     example:
-      '"All units, 10-31 in progress at 742 Elm Street. Suspect described as male, six foot, dark hoodie, blue jeans, heading east. Requesting unit respond."',
+      '"All units... 10-97 at {address}. Subject on property, dark clothing, approaching front door. Requesting nearest unit, respond."',
     isCustomizable: true,
   },
   {
@@ -109,7 +109,7 @@ const CORE_MODES: ResponseModeDef[] = [
     emoji: '👁️',
     desc: 'Simulates real person watching cameras.',
     example:
-      '"Hey — I\'ve got eyes on you right now. You in the dark hoodie near the gate. Walk away."',
+      '"Hey. This is {operator_name}. I\'m watching you, right now, on camera. You\'re on private property. You need to leave."',
     isCustomizable: true,
   },
   {
@@ -118,7 +118,7 @@ const CORE_MODES: ResponseModeDef[] = [
     emoji: '🛡️',
     desc: 'Professional, firm, liability-focused.',
     example:
-      '"This is private security. You are currently on monitored premises. Please leave the area immediately."',
+      '"Attention. This is private security monitoring. You have been recorded on camera, at this location. Leave the premises immediately, or authorities will be contacted."',
   },
   {
     id: 'recorded_evidence',
@@ -126,14 +126,14 @@ const CORE_MODES: ResponseModeDef[] = [
     emoji: '⏺️',
     desc: 'Cold system logging tone.',
     example:
-      '"Recording initiated. Subject identified at front entry. Male, dark jacket, estimated 6 foot. Timestamp logged."',
+      '"Recording active. Subject detected, on camera. Appearance, and location, logged. Footage has been preserved, for law enforcement."',
   },
   {
     id: 'homeowner',
     name: 'Homeowner',
     emoji: '🏠',
     desc: 'Personal, calm, direct.',
-    example: '"Hey — I can see you on camera. This is private property. Please leave now."',
+    example: '"Hey. I can see you, on my camera. This is private property. You need to leave, now."',
     isCustomizable: true,
   },
   {
@@ -142,7 +142,7 @@ const CORE_MODES: ResponseModeDef[] = [
     emoji: '🤖',
     desc: 'AI system voice with robot presets.',
     example:
-      '"Surveillance system active. Unrecognized individual detected at perimeter. Authorities have been notified."',
+      '"{system_name}, active. Unrecognized individual, detected on property. Location recorded. Authorities, have been notified."',
     isCustomizable: true,
   },
 ];
@@ -155,7 +155,7 @@ const SITUATIONAL_MODES: ResponseModeDef[] = [
     emoji: '🐕',
     desc: 'Implies threat without stating it.',
     example:
-      '"Hey — I see you on camera. Just so you know, Rex and Bruno haven\'t been fed yet today. I can let them out if you\'d like to stay."',
+      '"Hey. I can see you, on camera. Just so you know, {dog_names}, are right inside. I can open the door, if you want to stick around."',
     isCustomizable: true,
   },
   {
@@ -164,7 +164,7 @@ const SITUATIONAL_MODES: ResponseModeDef[] = [
     emoji: '🏘️',
     desc: 'Community awareness pressure.',
     example:
-      '"Attention — this is a neighborhood watch advisory. An unidentified individual has been observed and reported to community patrol."',
+      '"Attention. Neighborhood watch alert. An unidentified individual, has been spotted on camera, and reported to community patrol. Neighbors, have been notified."',
   },
 ];
 
@@ -1382,35 +1382,35 @@ const HOMEOWNER_MOODS: MoodDef[] = [
     label: 'Observant',
     emoji: '👀',
     desc: 'Just narrating. No demands.',
-    example: '"Just so you know, I can see you on my cameras."',
+    example: '"Hey. Just so you know, I can see you, right now, on camera. You\'re being recorded."',
   },
   {
     id: 'friendly',
     label: 'Friendly',
     emoji: '😊',
     desc: 'Warm, polite request.',
-    example: '"Hey there — everything okay? This is private property."',
+    example: '"Hey there. Everything okay? I can see you on camera. This is private property, just wanted to let you know."',
   },
   {
     id: 'firm',
     label: 'Firm',
     emoji: '😐',
     desc: 'Direct and serious. Default.',
-    example: '"I can see you on my cameras. You need to go."',
+    example: '"Hey. I can see you, on camera. This is private property. You need to leave, now."',
   },
   {
     id: 'confrontational',
     label: 'Confrontational',
     emoji: '😠',
     desc: 'Aggressive and territorial.',
-    example: '"Hey! What are you doing on my property? Get out!"',
+    example: '"Hey! I see you, right there, on camera. What are you doing on my property? Get out. Now."',
   },
   {
     id: 'threatening',
     label: 'Threatening',
     emoji: '💀',
     desc: 'Ominous. Implies consequences.',
-    example: '"You\'re on camera. Every second you stay makes this worse."',
+    example: '"You\'re on camera. I can see, everything, you\'re doing. Every second you stay, makes this worse, for you."',
   },
 ];
 
@@ -1585,6 +1585,8 @@ interface SurveillancePresetDef {
   emoji: string;
   desc: string;
   example: string;
+  /** Optional voice recommendation shown below the preset description. */
+  voiceHint?: string;
 }
 
 const SURVEILLANCE_PRESETS: SurveillancePresetDef[] = [
@@ -1593,35 +1595,36 @@ const SURVEILLANCE_PRESETS: SurveillancePresetDef[] = [
     label: 'Standard',
     emoji: '🤖',
     desc: 'Clinical AI system. Detached and factual.',
-    example: '"Subject identified. Location logged. Alert transmitted."',
+    example: '"{system_name}, active. Subject detected, on camera. Location, recorded. Alert, has been transmitted."',
   },
   {
     id: 't800',
     label: 'T-800',
     emoji: '🦾',
     desc: 'Flat, monotone, minimal words. Terminator-inspired.',
-    example: '"I see you. You have been identified. Leave now."',
+    example: '"Target, acquired. You have been, identified. Leave the area. Now."',
   },
   {
     id: 'hal',
     label: 'HAL 9000',
     emoji: '🔴',
     desc: 'Eerily polite, unnervingly calm.',
-    example: '"I\'m sorry, but I can\'t let you stay here. I can see everything you\'re doing."',
+    example: '"I\'m sorry, but, I can\'t let you stay here. I can see, everything, you\'re doing. I\'m afraid, I\'ve already notified the authorities."',
+    voiceHint: 'For the best HAL experience, set TTS to Piper with the "HAL 9000" voice.',
   },
   {
     id: 'wopr',
     label: 'WOPR',
     emoji: '🎮',
     desc: 'Analytical, game-theory language. WarGames-inspired.',
-    example: '"Probability of authorized access: zero. Calculating optimal response."',
+    example: '"Probability of authorized access, zero. Threat assessment, in progress. Calculating, optimal response."',
   },
   {
     id: 'glados',
     label: 'GLaDOS',
     emoji: '🧪',
     desc: 'Passive-aggressive, darkly humorous.',
-    example: '"Oh, how wonderful. Another test subject. I\'m recording everything. For science."',
+    example: '"Oh, how wonderful. Another test subject. I\'m recording, everything. For, science."',
   },
 ];
 
@@ -1713,6 +1716,12 @@ function SurveillanceSettings({
               {activePreset.example}
             </blockquote>
           )}
+          {activePreset.voiceHint && (
+            <p className="mt-2 flex items-center gap-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/40 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-400">
+              <span aria-hidden="true">💡</span>
+              {activePreset.voiceHint}
+            </p>
+          )}
         </div>
       </div>
     </div>
@@ -1774,6 +1783,11 @@ function substitutePreviewVars(text: string, config: ResponseModeConfig): string
   result = result.replaceAll('{dog_names}', dogStr);
   result = result.replaceAll('{system_name}', config.system_name || 'Surveillance system');
   result = result.replaceAll('{operator_name}', config.operator_name || 'the operator');
+  // Dispatch address substitution
+  const addr = config.dispatch?.full_address || config.dispatch?.address || '742 Elm Street';
+  result = result.replaceAll('{address}', addr);
+  const agency = config.dispatch?.agency || 'County dispatch';
+  result = result.replaceAll('{agency}', agency);
   return result;
 }
 
@@ -1821,9 +1835,6 @@ export function PersonaConfigForm({ value, onChange, ttsConfig }: PersonaConfigF
     FUN_MODES.some((m) => m.id === activeName),
   );
 
-  /** Whether the per-persona voice override section is expanded. */
-  const [voiceSectionOpen, setVoiceSectionOpen] = useState(false);
-
   /** Audio preview mutation — same pattern as TtsConfigForm. */
   const previewMutation = useMutation({ mutationFn: previewAudio });
 
@@ -1838,28 +1849,14 @@ export function PersonaConfigForm({ value, onChange, ttsConfig }: PersonaConfigF
   // Computed once per render; used by both the voice selector panel and the
   // Preview Voice button so the resolved voice is always consistent.
 
-  /** Returns the ModeVoiceConfig field name for the active TTS engine, or null if unsupported. */
-  function voiceFieldForEngine(engine: string): keyof ModeVoiceConfig | null {
-    if (engine === 'kokoro')     return 'kokoro_voice';
-    if (engine === 'openai')     return 'openai_voice';
-    if (engine === 'elevenlabs') return 'elevenlabs_voice';
-    if (engine === 'piper')      return 'piper_model';
-    return null;
-  }
-
-  const _engine         = ttsConfig?.engine ?? 'kokoro';
-  const _voiceField     = voiceFieldForEngine(_engine);
-  const _curatedDefault = PERSONA_VOICE_DEFAULTS[activeName] ?? {};
-  const _userOverride   = value.voice_overrides?.[activeName] ?? {};
-  const _hasVoiceOverride = _voiceField ? Boolean(_userOverride[_voiceField]) : false;
+  const _engine = ttsConfig?.engine ?? 'kokoro';
 
   /**
-   * Resolves the effective voice for the active engine following the priority:
-   * user override → curated default → global TTS config voice.
+   * Resolves the effective voice — always uses the global TTS config voice.
+   * Per-persona overrides are only available for police_dispatch (handled
+   * separately in DispatchSettings).
    */
   function resolveEffectiveVoice(): string {
-    if (_voiceField && _userOverride[_voiceField]) return _userOverride[_voiceField] as string;
-    if (_voiceField && _curatedDefault[_voiceField]) return _curatedDefault[_voiceField] as string;
     if (_engine === 'kokoro')     return ttsConfig?.kokoro_voice ?? 'af_heart';
     if (_engine === 'openai')     return ttsConfig?.openai_voice ?? 'onyx';
     if (_engine === 'elevenlabs') return ttsConfig?.elevenlabs_voice_id ?? '';
@@ -1868,34 +1865,6 @@ export function PersonaConfigForm({ value, onChange, ttsConfig }: PersonaConfigF
   }
 
   const _effectiveVoice = resolveEffectiveVoice();
-
-  /** Apply a voice override for the current persona + engine. */
-  function handlePersonaVoiceChange(selectedValue: string) {
-    if (!_voiceField) return;
-    onChange({
-      ...value,
-      voice_overrides: {
-        ...value.voice_overrides,
-        [activeName]: {
-          ...(value.voice_overrides?.[activeName] ?? {}),
-          [_voiceField]: selectedValue,
-        },
-      },
-    });
-  }
-
-  /** Remove the voice override for the current persona. */
-  function handlePersonaVoiceReset() {
-    const overrides = { ...(value.voice_overrides ?? {}) };
-    delete overrides[activeName];
-    const updated = { ...value };
-    if (Object.keys(overrides).length) {
-      updated.voice_overrides = overrides;
-    } else {
-      delete updated.voice_overrides;
-    }
-    onChange(updated);
-  }
 
   /** All modes combined for lookup. */
   const ALL_MODES = [...CORE_MODES, ...SITUATIONAL_MODES, ...FUN_MODES];
@@ -2083,7 +2052,7 @@ export function PersonaConfigForm({ value, onChange, ttsConfig }: PersonaConfigF
             Example output
           </p>
           <blockquote className="border-l-2 border-blue-500/60 pl-3 italic text-sm text-gray-700 dark:text-gray-200">
-            {activeDef.example}
+            {substitutePreviewVars(activeDef.example, value)}
           </blockquote>
           <p className="mt-2 text-xs text-gray-400 dark:text-gray-600">
             Output varies based on what the camera sees.
@@ -2091,211 +2060,29 @@ export function PersonaConfigForm({ value, onChange, ttsConfig }: PersonaConfigF
         </div>
       )}
 
-      {/* ── Per-persona voice selector ─────────────────────────────────────── */}
-      {activeName !== 'custom' && ttsConfig && (
-        <div className="rounded-xl border border-gray-200 dark:border-gray-700/50">
-          {/* Collapsible header */}
-          <button
-            type="button"
-            onClick={() => setVoiceSectionOpen((v) => !v)}
-            className={cn(
-              'flex w-full items-center justify-between px-4 py-2.5',
-              'text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400',
-              'hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors rounded-xl',
-              voiceSectionOpen && 'rounded-b-none',
-            )}
-            aria-expanded={voiceSectionOpen}
-          >
-            <span>Voice</span>
-            {voiceSectionOpen ? (
-              <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
-            ) : (
-              <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
-            )}
-          </button>
-
-          {voiceSectionOpen && (
-            <div className="border-t border-gray-200 dark:border-gray-700/50 px-4 py-3 space-y-3">
-              {/* Helper text */}
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                Each personality has a curated voice for best results. Override below, or leave
-                as default. The voice in TTS settings is the global fallback.
+      {/* ── Voice suggestion ─────────────────────────────────────────────── */}
+      {activeName !== 'custom' && activeName !== 'police_dispatch' && ttsConfig && (
+        (() => {
+          const suggestion = PERSONA_VOICE_DEFAULTS[activeName];
+          const suggestedVoice =
+            _engine === 'kokoro' ? suggestion?.kokoro_voice :
+            _engine === 'openai' ? suggestion?.openai_voice :
+            _engine === 'elevenlabs' ? suggestion?.elevenlabs_voice :
+            null;
+          if (!suggestedVoice) return null;
+          return (
+            <div className="flex items-start gap-2 rounded-xl border border-blue-200 bg-blue-50/50 px-4 py-2.5 dark:border-blue-800/40 dark:bg-blue-950/20">
+              <span className="mt-0.5 flex-shrink-0 text-blue-500" aria-hidden="true">💡</span>
+              <p className="text-xs text-blue-700 dark:text-blue-400">
+                <span className="font-medium">Suggested voice:</span>{' '}
+                <code className="rounded bg-blue-100 px-1 py-0.5 font-mono text-blue-800 dark:bg-blue-900/50 dark:text-blue-200">
+                  {suggestedVoice}
+                </code>
+                {' '}({_engine}) — change in the TTS tab to apply globally.
               </p>
-
-              {/* No voice selector for cartesia / polly / espeak */}
-              {!_voiceField ? (
-                <p className="text-xs text-gray-400 dark:text-gray-500">
-                  Per-persona voice selection is not available for {_engine}.
-                </p>
-              ) : (
-                <>
-                  {/* Kokoro voice selector */}
-                  {_engine === 'kokoro' && (
-                    <div>
-                      <label
-                        htmlFor="persona-voice-kokoro"
-                        className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300"
-                      >
-                        Kokoro Voice
-                        {_hasVoiceOverride && (
-                          <span className="ml-1.5 rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
-                            Overridden
-                          </span>
-                        )}
-                      </label>
-                      <select
-                        id="persona-voice-kokoro"
-                        value={_effectiveVoice}
-                        onChange={(e) => handlePersonaVoiceChange(e.target.value)}
-                        className={cn(
-                          'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm',
-                          'focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500',
-                          'dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100',
-                        )}
-                      >
-                        <optgroup label="American Female">
-                          <option value="af_heart">af_heart — American Female (A)</option>
-                          <option value="af_bella">af_bella — American Female (A-)</option>
-                          <option value="af_nicole">af_nicole — American Female (B-)</option>
-                          <option value="af_sarah">af_sarah — American Female (C+)</option>
-                          <option value="af_kore">af_kore — American Female (C+)</option>
-                        </optgroup>
-                        <optgroup label="American Male">
-                          <option value="am_michael">am_michael — American Male (C+)</option>
-                          <option value="am_fenrir">am_fenrir — American Male (C+)</option>
-                          <option value="am_adam">am_adam — American Male (F+)</option>
-                          <option value="am_onyx">am_onyx — American Male (D)</option>
-                        </optgroup>
-                        <optgroup label="British">
-                          <option value="bm_george">bm_george — British Male (C)</option>
-                          <option value="bf_emma">bf_emma — British Female (B-)</option>
-                          <option value="bm_fable">bm_fable — British Male (C)</option>
-                        </optgroup>
-                      </select>
-                    </div>
-                  )}
-
-                  {/* OpenAI voice selector */}
-                  {_engine === 'openai' && (
-                    <div>
-                      <label
-                        htmlFor="persona-voice-openai"
-                        className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300"
-                      >
-                        OpenAI Voice
-                        {_hasVoiceOverride && (
-                          <span className="ml-1.5 rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
-                            Overridden
-                          </span>
-                        )}
-                      </label>
-                      <select
-                        id="persona-voice-openai"
-                        value={_effectiveVoice}
-                        onChange={(e) => handlePersonaVoiceChange(e.target.value)}
-                        className={cn(
-                          'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm',
-                          'focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500',
-                          'dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100',
-                        )}
-                      >
-                        <option value="alloy">alloy — Neutral, balanced</option>
-                        <option value="echo">echo — Deeper, authoritative</option>
-                        <option value="fable">fable — Warm, expressive</option>
-                        <option value="onyx">onyx — Deep, commanding</option>
-                        <option value="nova">nova — Bright, energetic</option>
-                        <option value="shimmer">shimmer — Clear, pleasant</option>
-                      </select>
-                    </div>
-                  )}
-
-                  {/* ElevenLabs voice text input */}
-                  {_engine === 'elevenlabs' && (
-                    <div>
-                      <label
-                        htmlFor="persona-voice-elevenlabs"
-                        className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300"
-                      >
-                        ElevenLabs Voice ID
-                        {_hasVoiceOverride && (
-                          <span className="ml-1.5 rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
-                            Overridden
-                          </span>
-                        )}
-                      </label>
-                      <input
-                        id="persona-voice-elevenlabs"
-                        type="text"
-                        value={_userOverride.elevenlabs_voice ?? ''}
-                        onChange={(e) => handlePersonaVoiceChange(e.target.value)}
-                        placeholder={_curatedDefault.elevenlabs_voice ?? 'Paste voice ID from elevenlabs.io'}
-                        className={cn(
-                          'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono',
-                          'focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500',
-                          'dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100',
-                          'placeholder:text-gray-400 dark:placeholder:text-gray-500',
-                        )}
-                      />
-                      {_curatedDefault.elevenlabs_voice && (
-                        <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">
-                          Curated default: <code className="font-mono">{_curatedDefault.elevenlabs_voice}</code>
-                        </p>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Piper model selector */}
-                  {_engine === 'piper' && (
-                    <div>
-                      <label
-                        htmlFor="persona-voice-piper"
-                        className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300"
-                      >
-                        Piper Model
-                        {_hasVoiceOverride && (
-                          <span className="ml-1.5 rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
-                            Overridden
-                          </span>
-                        )}
-                      </label>
-                      <select
-                        id="persona-voice-piper"
-                        value={_effectiveVoice}
-                        onChange={(e) => handlePersonaVoiceChange(e.target.value)}
-                        className={cn(
-                          'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm',
-                          'focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500',
-                          'dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100',
-                        )}
-                      >
-                        <option value="en_US-lessac-medium">en_US-lessac-medium</option>
-                        <option value="en_US-ryan-medium">en_US-ryan-medium</option>
-                        <option value="en_US-amy-medium">en_US-amy-medium</option>
-                        <option value="en_GB-alan-medium">en_GB-alan-medium</option>
-                      </select>
-                    </div>
-                  )}
-
-                  {/* Reset to Default — only shown when an override is active */}
-                  {_hasVoiceOverride && (
-                    <button
-                      type="button"
-                      onClick={handlePersonaVoiceReset}
-                      className={cn(
-                        'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium',
-                        'border border-gray-200 text-gray-500 hover:border-gray-300 hover:bg-gray-50',
-                        'dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800/40',
-                        'transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
-                      )}
-                    >
-                      Reset to Default
-                    </button>
-                  )}
-                </>
-              )}
             </div>
-          )}
-        </div>
+          );
+        })()
       )}
 
       {/* ── Audio preview ──────────────────────────────────────────────────── */}
