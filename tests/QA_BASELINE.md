@@ -1,5 +1,5 @@
 # VoxWatch QA Baseline Manifest
-# Version: 1.2 | Date: 2026-03-25 | Coverage: All endpoints, components, and behaviors
+# Version: 1.3 | Date: 2026-03-27 | Coverage: All endpoints, components, and behaviors
 
 This manifest maps EVERY testable element in the VoxWatch system. If something
 is not listed here, it is not covered in QA. Update this document whenever the
@@ -531,5 +531,140 @@ On JSON parse failure: returns dict with all empty-string values (non-fatal).
 
 ---
 
-*Generated: 2026-03-25 | Version: 1.2 | Update on any API, component, or config change*
+*Generated: 2026-03-27 | Version: 1.3 | Update on any API, component, or config change*
 
+---
+
+## Section 13: Error Surfacing and TTS Fallback Pipeline (added 2026-03-27)
+
+### voxwatch/tts/base.py -- TTSResult.fallback_reason
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| fallback_reason | str | "" | Human-readable reason why primary TTS failed and a fallback provider was used. Empty string when no fallback occurred. Set by factory.generate_with_fallback() on the returned result. |
+
+### voxwatch/tts/factory.py -- _build_provider return type
+
+_build_provider(name, config) returns tuple[TTSProvider | None, str]:
+- On success: (provider_instance, "")
+- On failure: (None, error_description_string)
+
+All callers unpack with: provider, _err = _build_provider(...)
+This allows the factory to report why a provider was skipped without propagating exceptions.
+The error string is captured as primary_failure_reason and attached to TTSResult.fallback_reason when a fallback provider succeeds.
+
+### voxwatch/ai_vision.py -- _last_ai_error / get_last_ai_error()
+
+| Item | Detail |
+|------|--------|
+| Module-level var | _last_ai_error: str = "" -- tracks the last AI analysis failure across calls |
+| Accessor | get_last_ai_error() -> str -- returns the stored error string or "" if last call succeeded |
+| Reset | Set to "" on every successful analyze_snapshots() return |
+| Set on failure | Both-providers-failed path: combines primary and fallback error strings |
+| Purpose | Read by the service layer to publish MQTT error events without re-raising exceptions |
+
+### voxwatch/audio_pipeline.py -- AudioPipeline error publisher
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| set_error_publisher | (publisher: Any) -> None | Attaches an MQTT publisher object; called by VoxWatchService after pipeline construction |
+| _publish_pipeline_error | (error_type: str, error_message: str, camera: str = "", stage: int = 0) -> None | Calls publisher.publish_error(...) if publisher is attached; catches all exceptions |
+
+Error types published: tts_failed, audio_conversion_failed, audio_push_failed, go2rtc_sender_leak
+
+Call sites: generate_tts() on all-providers-exhausted; convert_to_camera_codec() on ffmpeg failure/timeout/not-found; push_audio_to_camera() on go2rtc HTTP error/timeout/generic exception; _check_sender_count() on leak threshold exceeded.
+
+### dashboard/backend/models/status_models.py -- VoxWatchServiceStatus
+
+New model added to SystemStatus. Read from /data/status.json by _read_voxwatch_status() in status.py. Staleness threshold: 30 seconds (mtime > 30s -> reachable=False).
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| reachable | bool | False | True if status.json was readable and mtime < 30 seconds ago |
+| service_running | bool | False | From status.json key service_running |
+| mqtt_connected | bool | False | From status.json key mqtt_connected |
+| uptime_seconds | float | None | From status.json key uptime_seconds |
+| version | str | None | From status.json key version |
+| error | str | None | Human-readable error if file is missing, stale, or unreadable |
+
+GET /api/status response now includes a voxwatch: VoxWatchServiceStatus field (previously omitted from the baseline). SystemStatus.voxwatch has default_factory=VoxWatchServiceStatus so the field is always present.
+
+### voxwatch/telemetry.py -- status.json shape (written by VoxWatch service)
+
+Keys in status.json consumed by _read_voxwatch_status():
+
+| JSON key | Consumed by VoxWatchServiceStatus field |
+|----------|-----------------------------------------|
+| service_running | service_running |
+| mqtt_connected | mqtt_connected |
+| uptime_seconds | uptime_seconds |
+| version | version |
+
+Additional keys in the file (not surfaced in VoxWatchServiceStatus): started_at, active_hours_active, cameras (per-camera stats dict with enabled, last_detection_at, cooldown_until, total_detections, total_audio_pushes, last_audio_push_success).
+
+### Response Headers -- POST /api/audio/preview
+
+New response headers forwarded by the preview endpoint:
+
+| Header | Value | Meaning |
+|--------|-------|---------|
+| X-TTS-Fallback-Reason | error string | Why primary TTS failed; only present when fallback was used |
+| X-VoxWatch-Proxy | "proxied" or "local-fallback" | "proxied" = forwarded to VoxWatch Preview API; "local-fallback" = VoxWatch unreachable, dashboard synthesized locally |
+
+Forwarding chain: voxwatch/preview_api.py sets X-TTS-Fallback-Reason -> dashboard audio.py forwards it -> browser reads it.
+
+### dashboard/frontend/src/api/status.ts -- AudioPreviewResult extended fields
+
+| Field | Type | Source header | Description |
+|-------|------|---------------|-------------|
+| fallbackReason | string (optional) | X-TTS-Fallback-Reason | Reason primary TTS failed; undefined when no fallback |
+| proxyFallback | boolean (optional) | X-VoxWatch-Proxy === "local-fallback" | True when VoxWatch unreachable and dashboard fell back to local synthesis |
+
+### dashboard/frontend/src/components/common/AudioPreview.tsx -- new props
+
+| Prop | Type | Behavior |
+|------|------|----------|
+| fallbackReason | string (optional) | Renders a sub-line below the TTS fallback warning with the formatted failure reason |
+| proxyFallback | boolean (optional) | When true, renders an amber alert banner explaining preview lacks full VoxWatch pipeline effects |
+
+### dashboard/frontend/src/components/audio/TestAudioButton.tsx -- amber unverified state
+
+After a successful POST /api/audio/test response the camera button enters an amber state (border-amber-500, AlertTriangle icon). This signals the API call succeeded but acoustic verification at the camera has not been confirmed. State is local to the component and resets on page refresh.
+
+### dashboard/backend/routers/audio.py -- cloud TTS nested config resolution
+
+_resolve_cloud_tts_key(key_name) two-tier lookup:
+1. Nested: tts.<provider>.api_key (e.g. tts.openai.api_key)
+2. Flat fallback: tts.<key_name> (e.g. tts.openai_api_key)
+
+${ENV_VAR} tokens resolved to live env var values. Masked values (starting with "***") treated as missing. Used by ElevenLabs, OpenAI, Cartesia, and Polly preview handlers.
+
+---
+
+## Section 14: Novelty Persona Removal (2026-03-27)
+
+Novelty category built-in personas were removed: tony_montana_dispatch, mafioso, pirate_captain, british_butler, disappointed_parent.
+
+### Current state after removal
+
+- Built-in modes count: 9 (unchanged -- see Section 12 table)
+- FUN_MODES array in ResponseModeStep.tsx: empty (FUN_MODES = [])
+- _DISPATCH_MODES in audio.py: frozenset({"police_dispatch"}) only
+
+### Stale references remaining (known, non-functional, no action required)
+
+| File | Reference | Type |
+|------|-----------|------|
+| dashboard/backend/routers/audio.py:972 | Comment mentions tony_montana_dispatch | Comment artifact |
+| voxwatch/config.py:210 | Comment mentions Tony Montana and novelty modes | Comment artifact |
+| voxwatch/modes/mode.py:26 | Docstring lists "novelty" category | Category still valid for user-defined modes |
+| voxwatch/modes/loader.py:321 | Same novelty category docstring | Category still valid for user-defined modes |
+| dashboard/frontend/src/types/config.ts:560,563 | ResponseMode.category includes "novelty" union member | Still valid for user-defined custom modes |
+| dashboard/backend/models/config_models.py:702 | Comment references "mafioso" as example key | Comment artifact |
+| dashboard/frontend/src/components/setup/steps/ResponseModeStep.tsx:173 | JSDoc references "fun/novelty groups" | The toggle renders but FUN_MODES=[] so no cards appear |
+| voxwatch/voxwatch_service.py:2003 | Comment example references "mafioso" | Comment artifact |
+
+None cause runtime errors, lint failures, or TypeScript errors. The "Fun / Novelty" toggle in the wizard renders but is visually empty.
+
+
+*Generated: 2026-03-27 | Version: 1.3 | Update on any API, component, or config change*
