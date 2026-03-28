@@ -36,7 +36,7 @@ import re
 import tempfile
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import aiohttp
 import yaml
@@ -140,7 +140,7 @@ class SetupStatus(BaseModel):
     cameras_configured: bool = Field(
         description="True when at least one camera entry is defined."
     )
-    frigate_host_env: Optional[str] = Field(
+    frigate_host_env: str | None = Field(
         default=None,
         description="Value of the FRIGATE_HOST env var for wizard pre-fill, or null.",
     )
@@ -171,7 +171,7 @@ class ProbeRequest(BaseModel):
         default=5000,
         description="Frigate API port to try first (default 5000). Also probes 5001 and 8971.",
     )
-    go2rtc_host: Optional[str] = Field(
+    go2rtc_host: str | None = Field(
         default=None,
         description="go2rtc hostname.  Defaults to frigate_host when null.",
     )
@@ -179,7 +179,7 @@ class ProbeRequest(BaseModel):
         default=1984,
         description="go2rtc API port (default 1984).",
     )
-    mqtt_host: Optional[str] = Field(
+    mqtt_host: str | None = Field(
         default=None,
         description="MQTT broker hostname.  Defaults to frigate_host when null.",
     )
@@ -224,26 +224,26 @@ class ProbeResult(BaseModel):
     frigate_reachable: bool = Field(
         description="True when Frigate responded on any probed port."
     )
-    frigate_version: Optional[str] = Field(
+    frigate_version: str | None = Field(
         default=None,
         description="Frigate version string (e.g. '0.14.1'), or null.",
     )
-    frigate_cameras: List[str] = Field(
+    frigate_cameras: list[str] = Field(
         default_factory=list,
         description="Camera names returned by the Frigate /api/config endpoint.",
     )
     go2rtc_reachable: bool = Field(
         description="True when go2rtc /api responded with HTTP 200."
     )
-    go2rtc_version: Optional[str] = Field(
+    go2rtc_version: str | None = Field(
         default=None,
         description="go2rtc version string (e.g. '1.9.10'), or null.",
     )
-    go2rtc_streams: List[str] = Field(
+    go2rtc_streams: list[str] = Field(
         default_factory=list,
         description="Stream names returned by go2rtc /api/streams.",
     )
-    backchannel_info: Dict[str, Any] = Field(
+    backchannel_info: dict[str, Any] = Field(
         default_factory=dict,
         description=(
             "Per-stream backchannel capabilities.  "
@@ -253,21 +253,21 @@ class ProbeResult(BaseModel):
     mqtt_reachable: bool = Field(
         description="True when the MQTT broker accepted a TCP connection."
     )
-    mqtt_host_detected: Optional[str] = Field(
+    mqtt_host_detected: str | None = Field(
         default=None,
         description=(
             "MQTT host extracted from Frigate's /api/config mqtt.host field. "
             "Null when Frigate is unreachable or mqtt.host is not set."
         ),
     )
-    mqtt_port_detected: Optional[int] = Field(
+    mqtt_port_detected: int | None = Field(
         default=None,
         description=(
             "MQTT port extracted from Frigate's /api/config mqtt.port field. "
             "Null when Frigate is unreachable or mqtt.port is not set."
         ),
     )
-    errors: List[str] = Field(
+    errors: list[str] = Field(
         default_factory=list,
         description="Non-fatal error messages from individual probe steps.",
     )
@@ -347,7 +347,7 @@ class GenerateConfigRequest(BaseModel):
         default=5000,
         description="Frigate API port (default 5000).",
     )
-    mqtt_host: Optional[str] = Field(
+    mqtt_host: str | None = Field(
         default=None,
         description="MQTT broker hostname.  Defaults to frigate_host when null.",
     )
@@ -365,7 +365,7 @@ class GenerateConfigRequest(BaseModel):
     )
 
     # ── go2rtc ────────────────────────────────────────────────────────────────
-    go2rtc_host: Optional[str] = Field(
+    go2rtc_host: str | None = Field(
         default=None,
         description="go2rtc hostname.  Defaults to frigate_host when null.",
     )
@@ -416,7 +416,7 @@ class GenerateConfigRequest(BaseModel):
     )
 
     # ── Cameras ───────────────────────────────────────────────────────────────
-    cameras: Dict[str, CameraSetupEntry] = Field(
+    cameras: dict[str, CameraSetupEntry] = Field(
         default_factory=dict,
         description="Camera definitions keyed by camera name.",
     )
@@ -427,9 +427,9 @@ class GenerateConfigRequest(BaseModel):
 async def _probe_frigate(
     session: aiohttp.ClientSession,
     host: str,
-    ports: List[int],
-    errors: List[str],
-) -> tuple[bool, Optional[str], List[str], Optional[str], Optional[int]]:
+    ports: list[int],
+    errors: list[str],
+) -> tuple[bool, str | None, list[str], str | None, int | None]:
     """Try each port in *ports* and return (reachable, version, cameras, mqtt_host, mqtt_port).
 
     Iterates through the port list and returns on the first successful
@@ -465,9 +465,9 @@ async def _probe_frigate(
                 version = (await resp.text()).strip().strip('"')
 
             # Probe cameras and MQTT settings from the Frigate config
-            cameras: List[str] = []
-            mqtt_host_detected: Optional[str] = None
-            mqtt_port_detected: Optional[int] = None
+            cameras: list[str] = []
+            mqtt_host_detected: str | None = None
+            mqtt_port_detected: int | None = None
             try:
                 async with session.get(
                     f"{base_url}/api/config", timeout=timeout
@@ -491,7 +491,7 @@ async def _probe_frigate(
 
             return True, version, cameras, mqtt_host_detected, mqtt_port_detected
 
-        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+        except (TimeoutError, aiohttp.ClientError) as exc:
             errors.append(f"Frigate port {port}: {exc}")
 
     return False, None, [], None, None
@@ -501,8 +501,8 @@ async def _probe_go2rtc(
     session: aiohttp.ClientSession,
     host: str,
     port: int,
-    errors: List[str],
-) -> tuple[bool, Optional[str], List[str], Dict[str, Any]]:
+    errors: list[str],
+) -> tuple[bool, str | None, list[str], dict[str, Any]]:
     """Probe go2rtc and return (reachable, version, stream_names, backchannel_info).
 
     Args:
@@ -526,25 +526,25 @@ async def _probe_go2rtc(
                 )
                 return False, None, [], {}
             api_data = await resp.json()
-            version: Optional[str] = api_data.get("version")
+            version: str | None = api_data.get("version")
 
         # GET /api/streams for stream list and backchannel info
-        streams: List[str] = []
-        backchannel_info: Dict[str, Any] = {}
+        streams: list[str] = []
+        backchannel_info: dict[str, Any] = {}
 
         try:
             async with session.get(
                 f"{base_url}/api/streams", timeout=timeout
             ) as s_resp:
                 if s_resp.status == 200:
-                    streams_data: Dict[str, Any] = await s_resp.json()
+                    streams_data: dict[str, Any] = await s_resp.json()
                     streams = list(streams_data.keys())
 
                     # Parse backchannel info from each stream's producer medias.
                     # A 'sendonly' track in the RTSP media description means the
                     # camera accepts audio — i.e. backchannel is available.
                     for stream_name, info in streams_data.items():
-                        codecs: List[str] = []
+                        codecs: list[str] = []
                         producers = info.get("producers", [])
                         if isinstance(producers, list):
                             for producer in producers:
@@ -570,7 +570,7 @@ async def _probe_go2rtc(
 
         return True, version, streams, backchannel_info
 
-    except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+    except (TimeoutError, aiohttp.ClientError) as exc:
         errors.append(f"go2rtc probe failed: {exc}")
         return False, None, [], {}
 
@@ -704,7 +704,7 @@ async def get_setup_status() -> SetupStatus:
     if exists:
         try:
             with config_path.open("r", encoding="utf-8") as fh:
-                raw: Dict[str, Any] = yaml.safe_load(fh) or {}
+                raw: dict[str, Any] = yaml.safe_load(fh) or {}
 
             frigate_cfg = raw.get("frigate", {})
             if isinstance(frigate_cfg, dict) and frigate_cfg.get("host"):
@@ -736,7 +736,7 @@ async def get_setup_status() -> SetupStatus:
 
     # Read FRIGATE_HOST env var for wizard pre-fill — common in Docker Compose
     # deployments where the same value is shared between containers.
-    frigate_host_env: Optional[str] = os.environ.get("FRIGATE_HOST") or None
+    frigate_host_env: str | None = os.environ.get("FRIGATE_HOST") or None
 
     return SetupStatus(
         config_exists=exists,
@@ -799,7 +799,7 @@ async def probe_services(req: ProbeRequest) -> ProbeResult:
     _validate_host(go2rtc_host, "go2rtc_host")
     _validate_host(mqtt_host, "mqtt_host")
 
-    errors: List[str] = []
+    errors: list[str] = []
     probe_start = time.monotonic()
 
     # Build the Frigate port probe list: requested port first, then fallbacks.
@@ -851,7 +851,7 @@ async def probe_services(req: ProbeRequest) -> ProbeResult:
     # extract each camera's IP from the go2rtc stream URL and do a direct ONVIF
     # probe using raw aiohttp — no dependency on any initialized service client.
     try:
-        from backend.camera_db import match_camera_model, SPEAKER_BUILTIN
+        from backend.camera_db import SPEAKER_BUILTIN, match_camera_model
         from backend.routers.cameras import _probe_onvif
 
         for cam_name, bc_info in backchannel_info.items():
@@ -940,10 +940,10 @@ class TestServiceResult(BaseModel):
 
     ok: bool = Field(description="True if the service responded successfully.")
     message: str = Field(description="Human-readable result description.")
-    version: Optional[str] = Field(
+    version: str | None = Field(
         default=None, description="Service version if detected."
     )
-    latency_ms: Optional[int] = Field(
+    latency_ms: int | None = Field(
         default=None, description="Round-trip time in milliseconds."
     )
 
@@ -1039,7 +1039,7 @@ async def test_go2rtc(req: TestServiceRequest) -> TestServiceResult:
                         version = data.get("version") if isinstance(data, dict) else None
                     except Exception:
                         pass
-                    msg = f"go2rtc is reachable"
+                    msg = "go2rtc is reachable"
                     if version:
                         msg += f" (v{version})"
                     return TestServiceResult(
@@ -1073,7 +1073,7 @@ async def test_go2rtc(req: TestServiceRequest) -> TestServiceResult:
         "No authentication required."
     ),
 )
-async def generate_config(req: GenerateConfigRequest) -> Dict[str, str]:
+async def generate_config(req: GenerateConfigRequest) -> dict[str, str]:
     """Build and atomically write config.yaml from wizard form data.
 
     Constructs a minimal but fully functional config dict, serialises it to
@@ -1114,7 +1114,7 @@ async def generate_config(req: GenerateConfigRequest) -> Dict[str, str]:
 
     # Frigate section — includes MQTT connection details because VoxWatch reads
     # MQTT settings from the frigate block (matching Frigate's own conventions).
-    frigate_section: Dict[str, Any] = {
+    frigate_section: dict[str, Any] = {
         "host": req.frigate_host,
         "port": req.frigate_port,
         "mqtt_host": mqtt_host,
@@ -1126,15 +1126,15 @@ async def generate_config(req: GenerateConfigRequest) -> Dict[str, str]:
         frigate_section["mqtt_password"] = req.mqtt_password
 
     # go2rtc section
-    go2rtc_section: Dict[str, Any] = {
+    go2rtc_section: dict[str, Any] = {
         "host": go2rtc_host,
         "api_port": req.go2rtc_port,
     }
 
     # Cameras section — one entry per camera supplied by the wizard.
-    cameras_section: Dict[str, Any] = {}
+    cameras_section: dict[str, Any] = {}
     for cam_name, cam in req.cameras.items():
-        cam_entry: Dict[str, Any] = {
+        cam_entry: dict[str, Any] = {
             "enabled": cam.enabled,
             "go2rtc_stream": cam.go2rtc_stream,
             "audio_codec": cam.audio_codec,
@@ -1145,7 +1145,7 @@ async def generate_config(req: GenerateConfigRequest) -> Dict[str, str]:
 
     # AI section — primary provider only.  Fallback left to defaults from
     # _apply_defaults() when the service loads the file.
-    ai_section: Dict[str, Any] = {
+    ai_section: dict[str, Any] = {
         "primary": {
             "provider": req.ai_provider,
             "model": req.ai_model,
@@ -1155,7 +1155,7 @@ async def generate_config(req: GenerateConfigRequest) -> Dict[str, str]:
         ai_section["primary"]["api_key"] = req.ai_api_key
 
     # TTS section — build sub-dict for the selected engine only.
-    tts_section: Dict[str, Any] = {
+    tts_section: dict[str, Any] = {
         "engine": req.tts_engine,
         "provider": req.tts_engine,  # both keys for compatibility
     }
@@ -1164,7 +1164,7 @@ async def generate_config(req: GenerateConfigRequest) -> Dict[str, str]:
     if req.tts_engine == "piper" and req.tts_voice:
         tts_section["piper"] = {"model": req.tts_voice}
     elif req.tts_engine == "kokoro":
-        kokoro_cfg: Dict[str, Any] = {}
+        kokoro_cfg: dict[str, Any] = {}
         if req.tts_voice:
             kokoro_cfg["voice"] = req.tts_voice
         if req.tts_host:
@@ -1174,7 +1174,7 @@ async def generate_config(req: GenerateConfigRequest) -> Dict[str, str]:
     elif req.tts_engine == "espeak" and req.tts_voice:
         tts_section["espeak"] = {"voice": req.tts_voice}
     elif req.tts_engine in ("elevenlabs", "openai", "cartesia"):
-        cloud_tts: Dict[str, Any] = {}
+        cloud_tts: dict[str, Any] = {}
         if req.tts_api_key:
             cloud_tts["api_key"] = req.tts_api_key
         if req.tts_voice:
@@ -1183,12 +1183,12 @@ async def generate_config(req: GenerateConfigRequest) -> Dict[str, str]:
             tts_section[req.tts_engine] = cloud_tts
 
     # Response mode section
-    response_mode_section: Dict[str, Any] = {"name": req.response_mode}
+    response_mode_section: dict[str, Any] = {"name": req.response_mode}
 
     # Assemble the final config dict.  Key order follows the logical reading
     # order that human contributors will expect (infrastructure first, then
     # AI / TTS settings, then cameras).
-    config: Dict[str, Any] = {
+    config: dict[str, Any] = {
         "frigate": frigate_section,
         "go2rtc": go2rtc_section,
         "cameras": cameras_section,

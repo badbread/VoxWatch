@@ -19,9 +19,7 @@ import json as _json
 import logging
 import random
 import time
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 
 import aiohttp
 from fastapi import APIRouter
@@ -158,8 +156,8 @@ class AiTestRequest(BaseModel):
 
     provider: str = Field(description="AI provider to test (gemini, openai, anthropic, grok, ollama)")
     model: str = Field(description="Model name to test (e.g. gemini-2.5-flash)")
-    api_key: Optional[str] = Field(default=None, description="API key (not needed for ollama)")
-    host: Optional[str] = Field(default=None, description="Host URL for self-hosted providers")
+    api_key: str | None = Field(default=None, description="API key (not needed for ollama)")
+    host: str | None = Field(default=None, description="Host URL for self-hosted providers")
 
 
 class AiTestResponse(BaseModel):
@@ -169,7 +167,7 @@ class AiTestResponse(BaseModel):
     provider: str = Field(description="Provider that was tested")
     model: str = Field(description="Model that was tested")
     message: str = Field(description="Human-readable result or error message")
-    response_time_ms: Optional[int] = Field(default=None, description="Response time in milliseconds")
+    response_time_ms: int | None = Field(default=None, description="Response time in milliseconds")
 
 
 @router.post(
@@ -275,7 +273,7 @@ async def test_ai_provider(request: AiTestRequest) -> AiTestResponse:
         )
 
 
-async def _test_gemini(api_key: str, model: str) -> Optional[str]:
+async def _test_gemini(api_key: str, model: str) -> str | None:
     """Test Gemini API. Returns None on success, error string on failure."""
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
     payload = {"contents": [{"parts": [{"text": "Respond with just the word OK"}]}]}
@@ -291,12 +289,12 @@ async def _test_gemini(api_key: str, model: str) -> Optional[str]:
             return f"HTTP {resp.status}: {body[:200]}"
 
 
-async def _test_openai(api_key: str, model: str) -> Optional[str]:
+async def _test_openai(api_key: str, model: str) -> str | None:
     """Test OpenAI API. Returns None on success, error string on failure."""
     return await _test_openai_compat(api_key, model, "https://api.openai.com/v1")
 
 
-async def _test_anthropic(api_key: str, model: str) -> Optional[str]:
+async def _test_anthropic(api_key: str, model: str) -> str | None:
     """Test Anthropic API. Returns None on success, error string on failure."""
     url = "https://api.anthropic.com/v1/messages"
     headers = {
@@ -321,7 +319,7 @@ async def _test_anthropic(api_key: str, model: str) -> Optional[str]:
             return f"HTTP {resp.status}: {body[:200]}"
 
 
-async def _test_openai_compat(api_key: str, model: str, base_url: str) -> Optional[str]:
+async def _test_openai_compat(api_key: str, model: str, base_url: str) -> str | None:
     """Test OpenAI-compatible API (OpenAI, Grok, custom). Returns None on success."""
     url = f"{base_url}/chat/completions"
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
@@ -342,7 +340,7 @@ async def _test_openai_compat(api_key: str, model: str, base_url: str) -> Option
             return f"HTTP {resp.status}: {body[:200]}"
 
 
-async def _test_ollama(host: str, model: str) -> Optional[str]:
+async def _test_ollama(host: str, model: str) -> str | None:
     """Test Ollama API. Returns None on success, error string on failure."""
     url = f"{host}/api/tags"
     try:
@@ -368,7 +366,7 @@ class TtsTestRequest(BaseModel):
     """Request body for POST /api/system/test-tts."""
 
     engine: str = Field(description="TTS engine to test (kokoro, piper, espeak, elevenlabs, etc.)")
-    text: Optional[str] = Field(default=None, description="Sample text to synthesize")
+    text: str | None = Field(default=None, description="Sample text to synthesize")
     config: dict = Field(default_factory=dict, description="Provider-specific config (API keys, voice, host, etc.)")
 
 
@@ -378,7 +376,7 @@ class TtsTestResponse(BaseModel):
     success: bool = Field(description="Whether the TTS provider responded successfully")
     engine: str = Field(description="Engine that was tested")
     message: str = Field(description="Human-readable result or error message")
-    synthesis_ms: Optional[int] = Field(default=None, description="Synthesis time in milliseconds")
+    synthesis_ms: int | None = Field(default=None, description="Synthesis time in milliseconds")
 
 
 @router.post(
@@ -512,7 +510,7 @@ async def _resolve_tts_key(cfg: dict, cfg_key: str, config_path: str) -> str:
     return ""
 
 
-async def _test_kokoro_tts(host: str) -> Optional[str]:
+async def _test_kokoro_tts(host: str) -> str | None:
     """Test Kokoro TTS server health. Returns None on success."""
     url = f"{host.rstrip('/')}/health"
     try:
@@ -525,7 +523,7 @@ async def _test_kokoro_tts(host: str) -> Optional[str]:
         return f"Cannot reach Kokoro at {host}: {exc}"
 
 
-async def _test_elevenlabs_tts(api_key: str) -> Optional[str]:
+async def _test_elevenlabs_tts(api_key: str) -> str | None:
     """Test ElevenLabs API key validity. Returns None on success."""
     if not api_key:
         return "No API key configured"
@@ -543,7 +541,7 @@ async def _test_elevenlabs_tts(api_key: str) -> Optional[str]:
         return f"Cannot reach ElevenLabs: {exc}"
 
 
-async def _test_openai_tts(api_key: str) -> Optional[str]:
+async def _test_openai_tts(api_key: str) -> str | None:
     """Test OpenAI API key for TTS access. Returns None on success."""
     if not api_key:
         return "No API key configured"
@@ -561,7 +559,7 @@ async def _test_openai_tts(api_key: str) -> Optional[str]:
         return f"Cannot reach OpenAI: {exc}"
 
 
-async def _test_cartesia_tts(api_key: str) -> Optional[str]:
+async def _test_cartesia_tts(api_key: str) -> str | None:
     """Test Cartesia API key validity. Returns None on success."""
     if not api_key:
         return "No API key configured"
@@ -579,7 +577,7 @@ async def _test_cartesia_tts(api_key: str) -> Optional[str]:
         return f"Cannot reach Cartesia: {exc}"
 
 
-async def _test_local_binary(name: str) -> Optional[str]:
+async def _test_local_binary(name: str) -> str | None:
     """Test if a local binary exists. Returns None if found."""
     import shutil
     if shutil.which(name):
@@ -593,7 +591,7 @@ async def _test_local_binary(name: str) -> Optional[str]:
 class LogEntry(BaseModel):
     """A single parsed log entry from the VoxWatch service log file."""
 
-    timestamp: Optional[str] = Field(
+    timestamp: str | None = Field(
         default=None,
         description="ISO 8601 timestamp parsed from the log line, or null if unparseable.",
     )
@@ -613,7 +611,7 @@ class LogsResponse(BaseModel):
     entries: list[LogEntry] = Field(description="Parsed log entries, oldest first.")
     lines_read: int = Field(description="Total lines read from the log file before filtering.")
     log_file: str = Field(description="Absolute path of the log file that was read.")
-    error: Optional[str] = Field(
+    error: str | None = Field(
         default=None,
         description="Error message when the file could not be opened, otherwise null.",
     )
@@ -859,8 +857,9 @@ async def run_mqtt_simulation(request: MqttSimRequest) -> MqttSimResponse:
 
     # Publish via paho-mqtt (synchronous client, run in thread)
     try:
-        import paho.mqtt.client as mqtt
         import asyncio
+
+        import paho.mqtt.client as mqtt
 
         def _publish():
             try:

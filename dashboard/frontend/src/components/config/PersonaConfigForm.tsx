@@ -2307,6 +2307,11 @@ export function PersonaConfigForm({ value, onChange, ttsConfig }: PersonaConfigF
             isLoading={previewMutation.isPending}
             error={previewMutation.isError ? (previewMutation.error as Error)?.message ?? 'Preview failed' : null}
             generationTimeMs={previewMutation.data?.generationTimeMs}
+            {...(previewMutation.data?.fallbackUsed != null ? { fallbackUsed: previewMutation.data.fallbackUsed } : {})}
+            {...(previewMutation.data?.actualProvider ? { actualProvider: previewMutation.data.actualProvider } : {})}
+            configuredProvider={ttsConfig?.engine}
+            {...(previewMutation.data?.fallbackReason ? { fallbackReason: previewMutation.data.fallbackReason } : {})}
+            proxyFallback={previewMutation.data?.proxyFallback ?? false}
           />
 
           {/* Preview Voice button — uses per-persona voice override → curated default → global TTS config. */}

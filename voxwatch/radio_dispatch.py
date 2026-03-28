@@ -27,7 +27,6 @@ Design goals:
 Supported dispatch response mode names (mirrors the check in
 ``VoxWatchService._is_dispatch_mode()``):
   - ``"police_dispatch"``        — female dispatcher, 10-codes
-  - ``"tony_montana_dispatch"``  — Tony Montana doing dispatch (theatrical)
 
 Usage (from the service pipeline)::
 

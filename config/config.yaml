@@ -238,9 +238,6 @@ radio_effect:
 #   guard_dog            — Implies a dog threat. "You don't want to be there."
 #   neighborhood_watch   — Community pressure. "Neighbors have been alerted."
 #
-# Fun / Novelty Modes (theatrical, good for demos):
-#   mafioso, tony_montana, pirate_captain, british_butler, disappointed_parent
-#
 # Set name to "custom" to supply your own prompt modifier via custom_prompt.
 response_mode:
   name: "private_security"     # Response mode name (see list above)
@@ -318,11 +315,6 @@ response_mode:
 #   neighborhood_alert     — Implies the whole block knows
 #   automated_surveillance — Neutral AI monitoring system
 #
-# Novelty (theatrical, good for demos):
-#   mafioso                — Tough wiseguy
-#   disappointed_parent    — Guilt-trip deterrence
-#   pirate_captain         — Theatrical nautical threats
-#   tony_montana           — Scarface energy
 #
 response_modes:
   active_mode: "police_dispatch"   # Default mode for all cameras

@@ -17,11 +17,12 @@
  */
 
 import { useState } from 'react';
-import { Play, Loader, CheckCircle, XCircle, Volume2 } from 'lucide-react';
+import { Play, Loader, XCircle, Volume2, AlertTriangle } from 'lucide-react';
 import { useMutation } from '@tanstack/react-query';
 import { cn } from '@/utils/cn';
 import { testAudio } from '@/api/audio';
 import { useServiceStatus } from '@/hooks/useServiceStatus';
+import type { ApiError } from '@/api/client';
 
 /**
  * Mobile-friendly audio push test with big tap targets.
@@ -101,7 +102,7 @@ export function TestAudioButton() {
                   isPending
                     ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950/30 dark:text-blue-300'
                     : isSuccess
-                      ? 'border-green-500 bg-green-50 text-green-700 dark:bg-green-950/30 dark:text-green-300'
+                      ? 'border-amber-500 bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300'
                       : idleStyle,
                 )}
               >
@@ -110,7 +111,7 @@ export function TestAudioButton() {
                   {isPending ? (
                     <Loader className="h-4 w-4 animate-spin" />
                   ) : isSuccess ? (
-                    <CheckCircle className="h-4 w-4" />
+                    <AlertTriangle className="h-4 w-4" />
                   ) : (
                     <Volume2 className="h-4 w-4" />
                   )}
@@ -228,18 +229,18 @@ export function TestAudioButton() {
           className={cn(
             'flex items-start gap-3 rounded-xl p-4 text-sm',
             mutation.data.success
-              ? 'bg-green-50 text-green-800 dark:bg-green-950/20 dark:text-green-300'
+              ? 'bg-amber-50 text-amber-800 dark:bg-amber-950/20 dark:text-amber-300'
               : 'bg-red-50 text-red-800 dark:bg-red-950/20 dark:text-red-300',
           )}
         >
           {mutation.data.success ? (
-            <CheckCircle className="mt-0.5 h-5 w-5 flex-shrink-0" />
+            <AlertTriangle className="mt-0.5 h-5 w-5 flex-shrink-0" />
           ) : (
             <XCircle className="mt-0.5 h-5 w-5 flex-shrink-0" />
           )}
           <div>
             <p className="font-semibold">
-              {mutation.data.success ? 'Audio sent' : 'Push failed'}
+              {mutation.data.success ? 'Audio sent — check camera speaker' : 'Push failed'}
             </p>
             <p className="mt-0.5 text-xs opacity-80">
               {mutation.data.message}
@@ -251,7 +252,11 @@ export function TestAudioButton() {
       {mutation.isError && (
         <div className="flex items-start gap-3 rounded-xl bg-red-50 p-4 text-sm text-red-800 dark:bg-red-950/20 dark:text-red-300">
           <XCircle className="mt-0.5 h-5 w-5 flex-shrink-0" />
-          <p className="font-semibold">Failed to contact backend.</p>
+          <p className="font-semibold">
+            {(mutation.error as ApiError)?.userMessage ||
+              (mutation.error as Error)?.message ||
+              'Failed to contact backend.'}
+          </p>
         </div>
       )}
     </div>

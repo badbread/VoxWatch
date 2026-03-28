@@ -429,8 +429,7 @@ export interface DispatchConfig {
  *
  * Built-in mode names: police_dispatch, live_operator, private_security,
  * recorded_evidence, homeowner, automated_surveillance, guard_dog,
- * neighborhood_watch, mafioso, tony_montana, pirate_captain, british_butler,
- * disappointed_parent, custom.
+ * neighborhood_watch, custom.
  * When name is "custom", custom_prompt is used as the modifier instead.
  */
 export interface ResponseModeConfig {

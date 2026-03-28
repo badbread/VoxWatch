@@ -17,10 +17,9 @@ Design notes:
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # ── Frigate Section ───────────────────────────────────────────────────────────
 
@@ -80,7 +79,7 @@ class CameraConfig(BaseModel):
             "The driveway is in the center. The kitchen window is on the right.'"
         ),
     )
-    audio_codec: Optional[str] = Field(
+    audio_codec: str | None = Field(
         default=None,
         description=(
             "Per-camera ffmpeg codec override (e.g. 'pcm_mulaw', 'pcm_alaw'). "
@@ -88,7 +87,7 @@ class CameraConfig(BaseModel):
             "for this camera's backchannel push. Leave None to inherit the global setting."
         ),
     )
-    sample_rate: Optional[int] = Field(
+    sample_rate: int | None = Field(
         default=None,
         ge=8000,
         le=48000,
@@ -97,7 +96,7 @@ class CameraConfig(BaseModel):
             "Leave None to inherit the global audio.sample_rate value."
         ),
     )
-    channels: Optional[int] = Field(
+    channels: int | None = Field(
         default=None,
         ge=1,
         le=2,
@@ -193,14 +192,14 @@ class AiProviderConfig(BaseModel):
         default="gemini-2.5-flash",
         description="Model name or identifier (provider-specific string)",
     )
-    api_key: Optional[str] = Field(
+    api_key: str | None = Field(
         default=None,
         description=(
             "API key for cloud providers — use ${ENV_VAR} syntax to avoid committing secrets. "
             "Leave None for self-hosted providers that do not require authentication."
         ),
     )
-    host: Optional[str] = Field(
+    host: str | None = Field(
         default=None,
         description=(
             "Base URL for self-hosted providers (e.g. 'http://localhost:11434' for Ollama). "
@@ -320,32 +319,32 @@ class TtsConfig(BaseModel):
         description="Speech rate multiplier (1.0 = normal speed)",
     )
     # Kokoro
-    kokoro_host: Optional[str] = Field(default=None, description="Kokoro HTTP server URL")
-    kokoro_voice: Optional[str] = Field(default="af_heart", description="Kokoro voice ID")
-    kokoro_speed: Optional[float] = Field(default=1.0, description="Kokoro speed multiplier")
+    kokoro_host: str | None = Field(default=None, description="Kokoro HTTP server URL")
+    kokoro_voice: str | None = Field(default="af_heart", description="Kokoro voice ID")
+    kokoro_speed: float | None = Field(default=1.0, description="Kokoro speed multiplier")
     # ElevenLabs
-    elevenlabs_api_key: Optional[str] = Field(default=None, description="ElevenLabs API key")
-    elevenlabs_voice_id: Optional[str] = Field(default=None, description="ElevenLabs voice ID")
-    elevenlabs_model: Optional[str] = Field(default="eleven_flash_v2_5", description="ElevenLabs model")
-    elevenlabs_stability: Optional[float] = Field(default=0.7, description="ElevenLabs stability")
-    elevenlabs_similarity: Optional[float] = Field(default=0.8, description="ElevenLabs similarity boost")
+    elevenlabs_api_key: str | None = Field(default=None, description="ElevenLabs API key")
+    elevenlabs_voice_id: str | None = Field(default=None, description="ElevenLabs voice ID")
+    elevenlabs_model: str | None = Field(default="eleven_flash_v2_5", description="ElevenLabs model")
+    elevenlabs_stability: float | None = Field(default=0.7, description="ElevenLabs stability")
+    elevenlabs_similarity: float | None = Field(default=0.8, description="ElevenLabs similarity boost")
     # Cartesia
-    cartesia_api_key: Optional[str] = Field(default=None, description="Cartesia API key")
-    cartesia_voice_id: Optional[str] = Field(default=None, description="Cartesia voice ID")
-    cartesia_model: Optional[str] = Field(default=None, description="Cartesia model")
-    cartesia_speed: Optional[float] = Field(default=1.0, description="Cartesia speed")
+    cartesia_api_key: str | None = Field(default=None, description="Cartesia API key")
+    cartesia_voice_id: str | None = Field(default=None, description="Cartesia voice ID")
+    cartesia_model: str | None = Field(default=None, description="Cartesia model")
+    cartesia_speed: float | None = Field(default=1.0, description="Cartesia speed")
     # Polly
-    polly_region: Optional[str] = Field(default="us-west-2", description="AWS region")
-    polly_voice_id: Optional[str] = Field(default="Matthew", description="Polly voice ID")
-    polly_engine: Optional[str] = Field(default="neural", description="Polly engine")
+    polly_region: str | None = Field(default="us-west-2", description="AWS region")
+    polly_voice_id: str | None = Field(default="Matthew", description="Polly voice ID")
+    polly_engine: str | None = Field(default="neural", description="Polly engine")
     # OpenAI
-    openai_api_key: Optional[str] = Field(default=None, description="OpenAI API key")
-    openai_model: Optional[str] = Field(default="tts-1", description="OpenAI TTS model")
-    openai_voice: Optional[str] = Field(default="onyx", description="OpenAI voice")
-    openai_speed: Optional[float] = Field(default=1.0, description="OpenAI speed")
+    openai_api_key: str | None = Field(default=None, description="OpenAI API key")
+    openai_model: str | None = Field(default="tts-1", description="OpenAI TTS model")
+    openai_voice: str | None = Field(default="onyx", description="OpenAI voice")
+    openai_speed: float | None = Field(default=1.0, description="OpenAI speed")
     # espeak
-    espeak_speed: Optional[int] = Field(default=130, description="espeak WPM")
-    espeak_pitch: Optional[int] = Field(default=30, description="espeak pitch")
+    espeak_speed: int | None = Field(default=130, description="espeak WPM")
+    espeak_pitch: int | None = Field(default=30, description="espeak pitch")
 
 
 # ── Audio Section ─────────────────────────────────────────────────────────────
@@ -468,19 +467,19 @@ class ModeVoiceOverride(BaseModel):
     mode's built-in default" for that provider.
     """
 
-    kokoro_voice: Optional[str] = Field(
+    kokoro_voice: str | None = Field(
         default=None,
         description="Kokoro voice ID override for this persona (e.g. 'af_bella').",
     )
-    openai_voice: Optional[str] = Field(
+    openai_voice: str | None = Field(
         default=None,
         description="OpenAI TTS voice override for this persona (e.g. 'nova', 'onyx').",
     )
-    elevenlabs_voice: Optional[str] = Field(
+    elevenlabs_voice: str | None = Field(
         default=None,
         description="ElevenLabs voice ID override for this persona.",
     )
-    piper_model: Optional[str] = Field(
+    piper_model: str | None = Field(
         default=None,
         description="Piper model override for this persona (e.g. 'en_US-lessac-medium').",
     )
@@ -603,7 +602,7 @@ class GuardDogConfig(BaseModel):
     generic phrase "the dogs" so all template slots remain grammatically valid.
     """
 
-    dog_names: List[str] = Field(
+    dog_names: list[str] = Field(
         default_factory=list,
         description=(
             "Dog names for the guard_dog persona (0-3 names). "
@@ -634,11 +633,6 @@ class PersonaConfig(BaseModel):
       - ``automated_surveillance`` — Neutral AI voice.
       - ``guard_dog``         — Implies dog threat. Indirect deterrence.
       - ``neighborhood_watch`` — Community awareness pressure.
-      - ``mafioso``           — Tough Italian-American wiseguy.
-      - ``tony_montana``      — Scarface energy. Dramatic.
-      - ``pirate_captain``    — Theatrical, threatening pirate captain.
-      - ``british_butler``    — Impeccably polite but passive-aggressive.
-      - ``disappointed_parent`` — Guilt-tripping, sighing disappointed parent.
       - ``custom``            — Uses the ``custom_prompt`` field instead of a built-in.
     """
 
@@ -702,7 +696,7 @@ class PersonaConfig(BaseModel):
         default_factory=GuardDogConfig,
         description="Guard dog persona customization (dog names).",
     )
-    voice_overrides: Optional[Dict[str, ModeVoiceOverride]] = Field(
+    voice_overrides: dict[str, ModeVoiceOverride] | None = Field(
         default=None,
         description=(
             "Per-persona voice overrides. Keys are mode IDs (e.g. 'mafioso'), "
@@ -745,7 +739,7 @@ class VoxWatchConfig(BaseModel):
         default_factory=Go2rtcConfig,
         description="go2rtc connection settings for audio push",
     )
-    cameras: Dict[str, CameraConfig] = Field(
+    cameras: dict[str, CameraConfig] = Field(
         default_factory=dict,
         description="Map of camera name -> camera config (name must match Frigate camera name)",
     )
@@ -789,7 +783,7 @@ class VoxWatchConfig(BaseModel):
             "police_dispatch mode."
         ),
     )
-    persona: Optional[PersonaConfig] = Field(
+    persona: PersonaConfig | None = Field(
         default=None,
         description=(
             "Deprecated: legacy persona key kept for backward compatibility with "
@@ -797,7 +791,7 @@ class VoxWatchConfig(BaseModel):
             "response_mode is absent, the service copies persona into response_mode."
         ),
     )
-    pipeline: Optional[Dict[str, Any]] = Field(
+    pipeline: dict[str, Any] | None = Field(
         default=None,
         description=(
             "Pipeline stage configuration: initial_response, escalation, resolution. "
@@ -808,7 +802,7 @@ class VoxWatchConfig(BaseModel):
         default_factory=LoggingConfig,
         description="Logging configuration",
     )
-    mqtt_publish: Optional[MqttPublishConfig] = Field(
+    mqtt_publish: MqttPublishConfig | None = Field(
         default=None,
         description=(
             "MQTT event publishing settings for Home Assistant integration. "
@@ -818,14 +812,14 @@ class VoxWatchConfig(BaseModel):
     )
 
     @model_validator(mode="after")
-    def at_least_one_camera(self) -> "VoxWatchConfig":
+    def at_least_one_camera(self) -> VoxWatchConfig:
         """Ensure at least one camera is defined (required for VoxWatch to function)."""
         if not self.cameras:
             raise ValueError("At least one camera must be configured under 'cameras'")
         return self
 
     @model_validator(mode="after")
-    def at_least_one_enabled_camera(self) -> "VoxWatchConfig":
+    def at_least_one_enabled_camera(self) -> VoxWatchConfig:
         """Ensure at least one camera has enabled: true."""
         enabled = [name for name, cam in self.cameras.items() if cam.enabled]
         if not enabled:

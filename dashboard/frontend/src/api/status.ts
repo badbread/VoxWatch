@@ -126,7 +126,7 @@ export async function testTtsProvider(req: TestTtsProviderRequest): Promise<Test
 
 /** Request body for POST /api/audio/preview. */
 export interface AudioPreviewRequest {
-  /** Persona name from the backend PERSONAS dict (e.g. "mafioso"). */
+  /** Persona name from the backend PERSONAS dict (e.g. "private_security"). */
   persona: string;
   /** TTS voice identifier (Kokoro voice ID, Piper model name, etc.). */
   voice: string;
@@ -150,6 +150,14 @@ export interface AudioPreviewResult {
   fallbackUsed?: boolean;
   /** Name of the provider that actually generated the audio. */
   actualProvider?: string;
+  /** Human-readable reason why the configured provider failed and fallback was used. */
+  fallbackReason?: string;
+  /**
+   * When true, the VoxWatch service was unreachable and local synthesis was used
+   * instead of proxying through the full VoxWatch audio pipeline.
+   * Derived from the X-VoxWatch-Proxy response header ("local-fallback" → true).
+   */
+  proxyFallback?: boolean;
 }
 
 /**
@@ -177,8 +185,13 @@ export async function previewAudio(req: AudioPreviewRequest): Promise<AudioPrevi
   // Read fallback provider headers — set by backend when configured TTS fails.
   const fallbackUsed = response.headers['x-tts-fallback'] === 'true';
   const actualProvider = response.headers['x-tts-provider'] || undefined;
+  const fallbackReason = response.headers['x-tts-fallback-reason'] || undefined;
 
-  return { blob: response.data, generationTimeMs, fallbackUsed, actualProvider };
+  // X-VoxWatch-Proxy: "local-fallback" means VoxWatch was unreachable and the
+  // dashboard fell back to local synthesis (no dispatch pipeline effects).
+  const proxyFallback = response.headers['x-voxwatch-proxy'] === 'local-fallback';
+
+  return { blob: response.data, generationTimeMs, fallbackUsed, actualProvider, fallbackReason, proxyFallback };
 }
 
 /** Request body for POST /api/audio/generate-intro. */

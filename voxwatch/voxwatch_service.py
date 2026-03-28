@@ -55,6 +55,7 @@ from voxwatch.ai_vision import (
     analyze_video,
     check_person_still_present,
     get_dispatch_initial_message,
+    get_last_ai_error,
     get_stage2_prompt,
     get_stage3_prompt,
     grab_snapshots,
@@ -77,12 +78,12 @@ from voxwatch.modes import (
     get_active_mode as get_active_mode_obj,
 )
 from voxwatch.modes.mode import VoiceConfig
+from voxwatch.mqtt_publisher import VoxWatchPublisher
 from voxwatch.radio_dispatch import (
     DISPATCH_MODES,
     compose_dispatch_audio,
     segment_dispatch_message,
 )
-from voxwatch.mqtt_publisher import VoxWatchPublisher
 from voxwatch.telemetry import (
     append_event_log,
     ensure_camera_stats,
@@ -286,6 +287,12 @@ class VoxWatchService:
         else:
             self._publisher = None
             logger.info("MQTT event publishing is disabled.")
+
+        # Wire the publisher into the audio pipeline so pipeline failures
+        # (TTS exhausted, ffmpeg errors, push failures) can be reported
+        # to Home Assistant via MQTT.
+        if self._audio:
+            self._audio.set_error_publisher(self._publisher)
 
         # Start the background task that periodically writes /data/status.json.
         # Named tasks show up more clearly in asyncio debug output.
@@ -1328,6 +1335,15 @@ class VoxWatchService:
                 )
                 if fallback_snaps:
                     desc = await analyze_snapshots(fallback_snaps, s3_prompt, self.config)
+                    ai_err = get_last_ai_error()
+                    if ai_err and self._publisher:
+                        self._publisher.publish_error(
+                            camera=camera_name,
+                            stage=3,
+                            error_type="ai_vision_failed",
+                            error_message=ai_err,
+                            fallback_used=True,
+                        )
                     if desc:
                         logger.info(
                             "Escalation analysis: snapshot result: %s", desc[:120]
@@ -1491,6 +1507,16 @@ class VoxWatchService:
                 prompt = f"Scene context: {scene_ctx}\n\n{prompt}"
 
             description = await analyze_snapshots(snapshots, prompt, self.config)
+            # Publish MQTT error if AI analysis failed and used fallback text.
+            ai_err = get_last_ai_error()
+            if ai_err and self._publisher:
+                self._publisher.publish_error(
+                    camera=camera_name,
+                    stage=2,
+                    error_type="ai_vision_failed",
+                    error_message=ai_err,
+                    fallback_used=True,
+                )
             logger.info(
                 "AI prep: description: %s",
                 description[:120] if description else "(none)",
@@ -1803,6 +1829,10 @@ class VoxWatchService:
             else:
                 self._publisher = None
                 logger.info("MQTT event publishing disabled.")
+            # Keep the audio pipeline's error publisher in sync with the
+            # (possibly new) publisher instance after hot-reload.
+            if self._audio:
+                self._audio.set_error_publisher(self._publisher)
 
         # Propagate the new config to the preview API so subsequent preview
         # requests use the updated dispatch address, agency, callsign, etc.

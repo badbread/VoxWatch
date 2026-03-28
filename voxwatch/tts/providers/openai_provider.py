@@ -74,24 +74,33 @@ class OpenAIProvider(TTSProvider):
             )
 
         tts_cfg = config.get("tts", {})
+        # Provider-specific sub-dict (nested config: tts.openai.api_key, etc.)
+        openai_cfg = tts_cfg.get("openai", {})
 
         api_key: str | None = (
-            tts_cfg.get("openai_api_key")
+            # Nested: tts.openai.api_key  (config.yaml style)
+            openai_cfg.get("api_key")
+            # Flat: tts.openai_api_key  (legacy / env override style)
+            or tts_cfg.get("openai_api_key")
+            # Environment variable fallback
             or os.environ.get("OPENAI_API_KEY")
         )
+        # Resolve ${ENV_VAR} placeholders that haven't been expanded yet.
+        if api_key and api_key.startswith("${"):
+            api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
             raise TTSProviderError(
                 self.name,
-                "No API key found. Set tts.openai_api_key in config.yaml "
+                "No API key found. Set tts.openai.api_key in config.yaml "
                 "or the OPENAI_API_KEY environment variable.",
             )
 
         self._api_key: str = api_key
-        self._model: str = tts_cfg.get("openai_model", "tts-1")
-        self._voice: str = tts_cfg.get("openai_voice", "onyx")
-        self._speed: float = float(tts_cfg.get("openai_speed", 1.0))
-        self._timeout: int = int(tts_cfg.get("openai_timeout", 30))
-        self._base_url: str = tts_cfg.get("openai_base_url", _DEFAULT_BASE_URL).rstrip("/")
+        self._model: str = openai_cfg.get("model") or tts_cfg.get("openai_model", "tts-1")
+        self._voice: str = openai_cfg.get("voice") or tts_cfg.get("openai_voice", "onyx")
+        self._speed: float = float(openai_cfg.get("speed") or tts_cfg.get("openai_speed", 1.0))
+        self._timeout: int = int(openai_cfg.get("timeout") or tts_cfg.get("openai_timeout", 30))
+        self._base_url: str = (openai_cfg.get("base_url") or tts_cfg.get("openai_base_url", _DEFAULT_BASE_URL)).rstrip("/")
 
         logger.debug(
             "OpenAIProvider ready: model=%s voice=%s speed=%.2f",

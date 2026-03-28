@@ -148,7 +148,7 @@ Seven providers with automatic fallback chain:
 
 ## Radio Dispatch System
 
-Specialized dispatch modes (`police_dispatch`, `tony_montana_dispatch`) that simulate radio communications.
+Specialized dispatch mode (`police_dispatch`) that simulates radio communications.
 
 **Multi-segment architecture:**
 1. Channel intro

@@ -18,10 +18,6 @@ Usage::
 
 from __future__ import annotations
 
-import re
-from typing import Optional
-
-
 # ---------------------------------------------------------------------------
 # Compatibility constants
 # ---------------------------------------------------------------------------
@@ -128,7 +124,7 @@ KNOWN_CAMERAS: dict[str, dict] = {
 # Model matching
 # ---------------------------------------------------------------------------
 
-def match_camera_model(model_string: str) -> Optional[dict]:
+def match_camera_model(model_string: str) -> dict | None:
     """Return capability info for a camera given its raw model string.
 
     Performs fuzzy matching so that full product variant strings such as

@@ -64,10 +64,13 @@ class ElevenLabsProvider(TTSProvider):
         super().__init__(config)
 
         tts_cfg = config.get("tts", {})
+        # Provider-specific sub-dict (nested config: tts.elevenlabs.api_key, etc.)
+        el_cfg = tts_cfg.get("elevenlabs", {})
 
-        # Prefer config value, fall back to environment variable.
+        # Prefer nested config, then flat config, then environment variable.
         api_key: str | None = (
-            tts_cfg.get("elevenlabs_api_key")
+            el_cfg.get("api_key")
+            or tts_cfg.get("elevenlabs_api_key")
             or os.environ.get("ELEVENLABS_API_KEY")
         )
         # Skip unresolved ${ENV_VAR} tokens
@@ -77,16 +80,16 @@ class ElevenLabsProvider(TTSProvider):
         if not api_key:
             raise TTSProviderError(
                 self.name,
-                "No API key found. Set tts.elevenlabs_api_key in config.yaml "
+                "No API key found. Set tts.elevenlabs.api_key in config.yaml "
                 "or the ELEVENLABS_API_KEY environment variable.",
             )
 
         self._api_key: str = api_key
-        self._voice_id: str = tts_cfg.get("elevenlabs_voice_id", _DEFAULT_VOICE_ID)
-        self._model: str = tts_cfg.get("elevenlabs_model", _DEFAULT_MODEL)
-        self._stability: float = float(tts_cfg.get("elevenlabs_stability", 0.5))
-        self._similarity_boost: float = float(tts_cfg.get("elevenlabs_similarity_boost", 0.75))
-        self._timeout: int = int(tts_cfg.get("elevenlabs_timeout", 30))
+        self._voice_id: str = el_cfg.get("voice_id") or tts_cfg.get("elevenlabs_voice_id", _DEFAULT_VOICE_ID)
+        self._model: str = el_cfg.get("model") or tts_cfg.get("elevenlabs_model", _DEFAULT_MODEL)
+        self._stability: float = float(el_cfg.get("stability") or tts_cfg.get("elevenlabs_stability", 0.5))
+        self._similarity_boost: float = float(el_cfg.get("similarity_boost") or tts_cfg.get("elevenlabs_similarity_boost", 0.75))
+        self._timeout: int = int(el_cfg.get("timeout") or tts_cfg.get("elevenlabs_timeout", 30))
         self._session: aiohttp.ClientSession | None = None
 
         logger.debug(

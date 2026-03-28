@@ -9,10 +9,9 @@ derived from config.yaml.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, Field
-
 
 # ── Per-Camera Status ─────────────────────────────────────────────────────────
 
@@ -26,33 +25,33 @@ class CameraStatus(BaseModel):
     name: str = Field(description="Camera name (matches Frigate and go2rtc names)")
     enabled: bool = Field(description="Whether VoxWatch has this camera enabled in config")
     # Frigate-sourced fields
-    frigate_online: Optional[bool] = Field(
+    frigate_online: bool | None = Field(
         default=None,
         description="Whether Frigate reports this camera as online",
     )
-    fps: Optional[float] = Field(
+    fps: float | None = Field(
         default=None,
         description="Current detection FPS reported by Frigate",
     )
     # go2rtc backchannel fields — determines if two-way audio is possible
-    has_backchannel: Optional[bool] = Field(
+    has_backchannel: bool | None = Field(
         default=None,
         description="Whether go2rtc reports a backchannel (sendonly audio) track for this camera",
     )
-    backchannel_codecs: Optional[List[str]] = Field(
+    backchannel_codecs: list[str] | None = Field(
         default=None,
         description="List of supported backchannel audio codecs (e.g. ['PCMU/8000', 'PCMA/8000'])",
     )
     # Camera identification — populated by POST /api/cameras/{name}/identify
-    camera_model: Optional[str] = Field(
+    camera_model: str | None = Field(
         default=None,
         description="Raw model string returned by ONVIF GetDeviceInformation",
     )
-    camera_manufacturer: Optional[str] = Field(
+    camera_manufacturer: str | None = Field(
         default=None,
         description="Manufacturer name returned by ONVIF or resolved from camera_db",
     )
-    speaker_status: Optional[str] = Field(
+    speaker_status: str | None = Field(
         default=None,
         description=(
             "Audio output capability of this camera. "
@@ -64,16 +63,16 @@ class CameraStatus(BaseModel):
             "'override' — user confirmed compatibility manually."
         ),
     )
-    compatibility_notes: Optional[str] = Field(
+    compatibility_notes: str | None = Field(
         default=None,
         description="Human-readable compatibility notes from camera_db or ONVIF probe",
     )
     # Last detection timing (from events.jsonl)
-    last_detection_at: Optional[str] = Field(
+    last_detection_at: str | None = Field(
         default=None,
         description="ISO timestamp of the last detection event on this camera",
     )
-    last_latency_ms: Optional[int] = Field(
+    last_latency_ms: int | None = Field(
         default=None,
         description="Total pipeline latency in milliseconds for the last detection",
     )
@@ -85,16 +84,16 @@ class FrigateStatus(BaseModel):
     """Status of the Frigate NVR service as reported by its API."""
 
     reachable: bool = Field(description="Whether the dashboard can reach Frigate's API")
-    version: Optional[str] = Field(default=None, description="Frigate version string")
-    camera_count: Optional[int] = Field(
+    version: str | None = Field(default=None, description="Frigate version string")
+    camera_count: int | None = Field(
         default=None,
         description="Number of cameras Frigate knows about",
     )
-    uptime_seconds: Optional[int] = Field(
+    uptime_seconds: int | None = Field(
         default=None,
         description="Frigate process uptime in seconds",
     )
-    error: Optional[str] = Field(
+    error: str | None = Field(
         default=None,
         description="Error message if Frigate is not reachable",
     )
@@ -104,12 +103,12 @@ class Go2rtcStatus(BaseModel):
     """Status of the go2rtc audio/video relay as reported by its API."""
 
     reachable: bool = Field(description="Whether the dashboard can reach go2rtc's API")
-    version: Optional[str] = Field(default=None, description="go2rtc version string")
-    stream_count: Optional[int] = Field(
+    version: str | None = Field(default=None, description="go2rtc version string")
+    stream_count: int | None = Field(
         default=None,
         description="Number of streams go2rtc currently has configured",
     )
-    error: Optional[str] = Field(
+    error: str | None = Field(
         default=None,
         description="Error message if go2rtc is not reachable",
     )
@@ -123,18 +122,18 @@ class SystemInfo(BaseModel):
     Populated on startup and cached — not updated at every status poll.
     """
 
-    hostname: Optional[str] = Field(default=None, description="System hostname")
-    platform: Optional[str] = Field(default=None, description="OS platform string")
-    python_version: Optional[str] = Field(default=None, description="Python version string")
-    config_path: Optional[str] = Field(
+    hostname: str | None = Field(default=None, description="System hostname")
+    platform: str | None = Field(default=None, description="OS platform string")
+    python_version: str | None = Field(default=None, description="Python version string")
+    config_path: str | None = Field(
         default=None,
         description="Path to config.yaml currently in use",
     )
-    data_dir: Optional[str] = Field(
+    data_dir: str | None = Field(
         default=None,
         description="Path to the /data directory",
     )
-    events_file: Optional[str] = Field(
+    events_file: str | None = Field(
         default=None,
         description="Path to the events.jsonl file (informational; not actively read)",
     )
@@ -142,17 +141,41 @@ class SystemInfo(BaseModel):
 
 # ── Dashboard-Level Aggregated Status ────────────────────────────────────────
 
+class VoxWatchServiceStatus(BaseModel):
+    """Live status of the VoxWatch detection service.
+
+    Read from /data/status.json which the VoxWatch container writes every
+    few seconds.  Gives the dashboard visibility into whether the service
+    is running, MQTT is connected, and the TTS provider is healthy.
+    """
+
+    reachable: bool = Field(
+        default=False,
+        description="True if status.json was readable and recently updated",
+    )
+    service_running: bool = Field(default=False, description="Whether the VoxWatch service loop is active")
+    mqtt_connected: bool = Field(default=False, description="Whether MQTT is connected to the broker")
+    uptime_seconds: float | None = Field(default=None, description="Service uptime in seconds")
+    version: str | None = Field(default=None, description="VoxWatch service version string")
+    error: str | None = Field(default=None, description="Error message if status.json could not be read")
+
+
 class SystemStatus(BaseModel):
     """Complete system status snapshot returned by GET /api/status.
 
-    Aggregates Frigate status, go2rtc status, and per-camera summaries
-    from config.yaml into a single response for the dashboard overview.
+    Aggregates Frigate status, go2rtc status, VoxWatch service status,
+    and per-camera summaries from config.yaml into a single response
+    for the dashboard overview.
     """
 
     timestamp: datetime = Field(description="When this status snapshot was assembled")
     frigate: FrigateStatus = Field(description="Frigate NVR service status")
     go2rtc: Go2rtcStatus = Field(description="go2rtc relay service status")
-    cameras: List[CameraStatus] = Field(
+    voxwatch: VoxWatchServiceStatus = Field(
+        default_factory=VoxWatchServiceStatus,
+        description="VoxWatch detection service status (from status.json)",
+    )
+    cameras: list[CameraStatus] = Field(
         default_factory=list,
         description="List of per-camera status objects derived from config.yaml",
     )
@@ -170,7 +193,7 @@ class HealthStatus(BaseModel):
     status: Literal["ok", "degraded", "error"] = Field(
         description="Overall health: ok = config loaded, degraded = config missing, error = critical"
     )
-    dashboard_uptime_seconds: Optional[float] = Field(
+    dashboard_uptime_seconds: float | None = Field(
         default=None,
         description="Seconds since the dashboard backend process started",
     )

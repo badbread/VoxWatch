@@ -17,8 +17,8 @@ import asyncio
 import json
 import logging
 import os
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter
 
@@ -28,6 +28,7 @@ from backend.models.status_models import (
     FrigateStatus,
     Go2rtcStatus,
     SystemStatus,
+    VoxWatchServiceStatus,
 )
 from backend.services import frigate_client as fc_module
 from backend.services import go2rtc_client as g2rtc_module
@@ -87,12 +88,61 @@ async def get_status() -> SystemStatus:
             cam.last_detection_at = ev.get("timestamp")
             cam.last_latency_ms = ev.get("total_latency_ms")
 
+    voxwatch_status = _read_voxwatch_status()
+
     return SystemStatus(
-        timestamp=datetime.now(tz=timezone.utc),
+        timestamp=datetime.now(tz=UTC),
         frigate=frigate_result,
         go2rtc=go2rtc_result,
+        voxwatch=voxwatch_status,
         cameras=cameras,
     )
+
+
+def _read_voxwatch_status() -> VoxWatchServiceStatus:
+    """Read the VoxWatch service status from /data/status.json.
+
+    The VoxWatch container writes this file every few seconds with its
+    running state, MQTT connection status, and uptime.  If the file is
+    missing or stale (>30s old), we report unreachable.
+
+    Returns:
+        VoxWatchServiceStatus populated from the file, or a default
+        "unreachable" status on any read error.
+    """
+    status_path = os.path.join(cfg.DATA_DIR, "status.json")
+    try:
+        # Check staleness — if the file hasn't been updated in 30s,
+        # the VoxWatch service is likely down.
+        mtime = os.path.getmtime(status_path)
+        age = datetime.now().timestamp() - mtime
+        if age > 30:
+            return VoxWatchServiceStatus(
+                reachable=False,
+                error=f"status.json is {int(age)}s stale — VoxWatch may not be running",
+            )
+
+        with open(status_path, encoding="utf-8") as fh:
+            data = json.load(fh)
+
+        return VoxWatchServiceStatus(
+            reachable=True,
+            service_running=data.get("service_running", False),
+            mqtt_connected=data.get("mqtt_connected", False),
+            uptime_seconds=data.get("uptime_seconds"),
+            version=data.get("version"),
+        )
+    except FileNotFoundError:
+        return VoxWatchServiceStatus(
+            reachable=False,
+            error="status.json not found — VoxWatch service may not have started",
+        )
+    except Exception as exc:
+        logger.warning("Failed to read VoxWatch status.json: %s", exc)
+        return VoxWatchServiceStatus(
+            reachable=False,
+            error=str(exc),
+        )
 
 
 async def _probe_frigate() -> FrigateStatus:
@@ -123,7 +173,7 @@ async def _probe_go2rtc() -> Go2rtcStatus:
     return await g2rtc_module.go2rtc_client.probe_status()
 
 
-def _read_last_events() -> Dict[str, Dict[str, Any]]:
+def _read_last_events() -> dict[str, dict[str, Any]]:
     """Read events.jsonl and return the last event per camera.
 
     Reads the file in reverse (last lines first) to find the most recent
@@ -132,7 +182,7 @@ def _read_last_events() -> Dict[str, Dict[str, Any]]:
     Returns:
         Dict mapping camera name to the last event dict for that camera.
     """
-    result: Dict[str, Dict[str, Any]] = {}
+    result: dict[str, dict[str, Any]] = {}
     events_path = cfg.EVENTS_FILE
 
     if not os.path.exists(events_path):
@@ -140,7 +190,7 @@ def _read_last_events() -> Dict[str, Dict[str, Any]]:
 
     try:
         # Read last 50 lines (enough to cover all cameras)
-        with open(events_path, "r", encoding="utf-8") as fh:
+        with open(events_path, encoding="utf-8") as fh:
             lines = fh.readlines()
 
         # Walk backwards to find the latest event per camera
@@ -161,7 +211,7 @@ def _read_last_events() -> Dict[str, Dict[str, Any]]:
     return result
 
 
-async def _cameras_from_config() -> List[CameraStatus]:
+async def _cameras_from_config() -> list[CameraStatus]:
     """Build a basic camera status list from config.yaml.
 
     Returns:
@@ -186,7 +236,7 @@ async def _cameras_from_config() -> List[CameraStatus]:
 async def _cameras_merged(
     frigate_status: FrigateStatus,
     go2rtc_status: Go2rtcStatus,
-) -> List[CameraStatus]:
+) -> list[CameraStatus]:
     """Build a unified camera list from all visible sources.
 
     Merges cameras from three sources in order of priority:

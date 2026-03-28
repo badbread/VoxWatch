@@ -29,8 +29,8 @@ import os
 import re
 import urllib.parse
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import UTC, datetime
+from typing import Any
 
 import aiohttp
 from fastapi import APIRouter, HTTPException, Response, status
@@ -83,14 +83,14 @@ def _validate_camera_name(camera_name: str) -> None:
 
 @router.get(
     "",
-    response_model=List[CameraStatus],
+    response_model=list[CameraStatus],
     summary="List all cameras",
     description=(
         "Returns the list of cameras configured in config.yaml, "
         "enriched with live status from Frigate."
     ),
 )
-async def list_cameras() -> List[CameraStatus]:
+async def list_cameras() -> list[CameraStatus]:
     """Return ALL cameras from Frigate, enriched with VoxWatch config status.
 
     Discovers cameras from the Frigate API (so every camera in the system
@@ -101,12 +101,12 @@ async def list_cameras() -> List[CameraStatus]:
         List of CameraStatus objects, one per Frigate camera.
     """
     voxwatch_cameras = await _get_cameras_config()
-    result: List[CameraStatus] = []
+    result: list[CameraStatus] = []
 
     # Fetch Frigate stats and go2rtc backchannel info concurrently
     import asyncio
-    frigate_cameras: Dict[str, Any] = {}
-    backchannel_info: Dict[str, Any] = {}
+    frigate_cameras: dict[str, Any] = {}
+    backchannel_info: dict[str, Any] = {}
 
     async def _fetch_frigate() -> None:
         nonlocal frigate_cameras
@@ -144,7 +144,7 @@ async def list_cameras() -> List[CameraStatus]:
     ]
 
     # Results from ONVIF probe + camera_db lookup, keyed by camera name
-    speaker_overrides: Dict[str, Dict[str, Any]] = {}
+    speaker_overrides: dict[str, dict[str, Any]] = {}
 
     async def _identify_speaker(cam_name: str) -> None:
         """ONVIF-probe a camera and cross-reference the camera DB.
@@ -213,7 +213,7 @@ async def list_cameras() -> List[CameraStatus]:
         # built-in speaker, mark backchannel as unavailable and populate
         # speaker_status so the frontend can show the correct state.
         override = speaker_overrides.get(name)
-        extra_fields: Dict[str, Any] = {}
+        extra_fields: dict[str, Any] = {}
         if override:
             extra_fields["camera_model"] = override["camera_model"]
             extra_fields["camera_manufacturer"] = override["camera_manufacturer"]
@@ -338,9 +338,9 @@ async def get_snapshot(camera_name: str) -> Response:
         "manufacturer and model string, then cross-references that model against "
         "the VoxWatch compatibility database to determine speaker capability."
     ),
-    response_model=Dict[str, Any],
+    response_model=dict[str, Any],
 )
-async def identify_camera(camera_name: str) -> Dict[str, Any]:
+async def identify_camera(camera_name: str) -> dict[str, Any]:
     """Attempt ONVIF identification and compatibility lookup for a camera.
 
     Steps:
@@ -450,7 +450,7 @@ async def identify_camera(camera_name: str) -> Dict[str, Any]:
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-async def _get_cameras_config() -> Dict[str, Any]:
+async def _get_cameras_config() -> dict[str, Any]:
     """Read the cameras section from config.yaml.
 
     Returns:
@@ -506,7 +506,7 @@ async def _enrich_with_frigate(cam_status: CameraStatus) -> CameraStatus:
 
 # Credential pairs to try during ONVIF probing, in priority order.
 # The RTSP-URL credentials are prepended at runtime if present.
-_FALLBACK_CREDENTIALS: List[Tuple[str, str]] = [
+_FALLBACK_CREDENTIALS: list[tuple[str, str]] = [
     ("admin", "admin"),
     ("admin", ""),
     ("admin", "password"),
@@ -518,7 +518,7 @@ _ONVIF_TIMEOUT = aiohttp.ClientTimeout(total=4.0)
 
 async def _resolve_camera_ip(
     camera_name: str,
-) -> Tuple[Optional[str], Optional[Tuple[str, str]]]:
+) -> tuple[str | None, tuple[str, str] | None]:
     """Extract the IP address and credentials from a camera's RTSP URL in go2rtc.
 
     Looks up the go2rtc stream for *camera_name*, finds the first RTSP producer
@@ -551,7 +551,7 @@ async def _resolve_camera_ip(
 
             parsed = urllib.parse.urlparse(url_str)
             ip = parsed.hostname
-            credentials: Optional[Tuple[str, str]] = None
+            credentials: tuple[str, str] | None = None
             if parsed.username:
                 credentials = (
                     urllib.parse.unquote(parsed.username),
@@ -567,8 +567,8 @@ async def _resolve_camera_ip(
 
 async def _probe_onvif(
     camera_ip: str,
-    rtsp_credentials: Optional[Tuple[str, str]],
-) -> Optional[Dict[str, Optional[str]]]:
+    rtsp_credentials: tuple[str, str] | None,
+) -> dict[str, str | None] | None:
     """Send an ONVIF GetDeviceInformation SOAP request to the camera.
 
     Tries multiple credential pairs so that cameras whose passwords differ from
@@ -589,7 +589,7 @@ async def _probe_onvif(
         (string values, may be ``None``), or ``None`` if all attempts fail.
     """
     # Build the ordered credential list
-    credential_list: List[Tuple[str, str]] = []
+    credential_list: list[tuple[str, str]] = []
     if rtsp_credentials:
         credential_list.append(rtsp_credentials)
     for cred in _FALLBACK_CREDENTIALS:
@@ -656,7 +656,7 @@ def _build_onvif_soap(username: str, password: str) -> str:
     """
     nonce_bytes = os.urandom(16)
     nonce_b64 = base64.b64encode(nonce_bytes).decode()
-    created = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    created = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     # SHA-1(nonce_raw + created_bytes + password_bytes)
     digest_input = nonce_bytes + created.encode("utf-8") + password.encode("utf-8")
@@ -689,7 +689,7 @@ def _build_onvif_soap(username: str, password: str) -> str:
 </s:Envelope>"""
 
 
-def _parse_device_info_response(soap_text: str) -> Optional[Dict[str, Optional[str]]]:
+def _parse_device_info_response(soap_text: str) -> dict[str, str | None] | None:
     """Extract device information fields from an ONVIF SOAP response.
 
     Parses ``GetDeviceInformationResponse`` elements from the SOAP body.
@@ -720,7 +720,7 @@ def _parse_device_info_response(soap_text: str) -> Optional[Dict[str, Optional[s
     # ONVIF GetDeviceInformationResponse namespace
     ns = "http://www.onvif.org/ver10/device/wsdl"
 
-    def _text(tag: str) -> Optional[str]:
+    def _text(tag: str) -> str | None:
         """Return stripped text for the first matching element, or None."""
         el = root.find(f".//{{{ns}}}{tag}")
         return el.text.strip() if el is not None and el.text else None

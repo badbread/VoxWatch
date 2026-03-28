@@ -16,7 +16,7 @@ filesystem. If validation fails the existing config.yaml is never modified.
 """
 
 import logging
-from typing import Any, Dict
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import PlainTextResponse
@@ -39,7 +39,7 @@ router = APIRouter(prefix="/config", tags=["Configuration"])
         "Unresolved ${ENV_VAR} tokens are returned as-is."
     ),
 )
-async def get_config() -> Dict[str, Any]:
+async def get_config() -> dict[str, Any]:
     """Return the current config.yaml with sensitive fields masked.
 
     Returns:
@@ -105,7 +105,7 @@ async def get_config_raw() -> PlainTextResponse:
     ),
     status_code=status.HTTP_200_OK,
 )
-async def save_config(data: Dict[str, Any]) -> Dict[str, Any]:
+async def save_config(data: dict[str, Any]) -> dict[str, Any]:
     """Validate and atomically write new config.yaml.
 
     The request body should be the full config JSON object (as returned by GET).
@@ -169,7 +169,7 @@ async def save_config(data: Dict[str, Any]) -> Dict[str, Any]:
     ),
     response_model=ConfigValidationResult,
 )
-async def validate_config(data: Dict[str, Any]) -> ConfigValidationResult:
+async def validate_config(data: dict[str, Any]) -> ConfigValidationResult:
     """Dry-run config validation.
 
     Runs the submitted config through all Pydantic validators and returns

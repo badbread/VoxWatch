@@ -89,6 +89,31 @@ def _frigate_base_url(config: dict) -> str:
 
 logger = logging.getLogger("voxwatch.ai_vision")
 
+# ── Last AI analysis error ─────────────────────────────────────────────────────
+# Populated when the primary and fallback providers both fail and a generic
+# description is returned instead.  Read by the service layer to publish MQTT
+# error events.  Reset to "" on every successful analysis so callers can
+# distinguish transient failures from persistent ones.
+_last_ai_error: str = ""
+
+
+def get_last_ai_error() -> str:
+    """Return the last AI analysis error, or empty string if last analysis succeeded.
+
+    The error string is set whenever both the primary and fallback AI providers
+    fail (or when Frigate returns no snapshots).  It is cleared to an empty
+    string on any successful AI analysis.
+
+    Intended for use by the service layer to publish structured MQTT error
+    events without changing the return type of ``analyze_snapshots``.
+
+    Returns:
+        A human-readable error string describing the failure, or ``""`` if the
+        most recent analysis completed without error.
+    """
+    return _last_ai_error
+
+
 # ── Shared aiohttp session ─────────────────────────────────────────────────────
 # Reusing a single ClientSession avoids the cost of creating a new TCP
 # connection pool for every HTTP call (snapshot fetches, Ollama, Frigate checks).
@@ -816,11 +841,24 @@ async def analyze_snapshots(
         AI-generated description string.  Returns a safe default message if
         all providers fail so the pipeline can continue.
     """
+    global _last_ai_error
+
     if not images:
         logger.warning("analyze_snapshots called with no images")
+        # Record the no-snapshot condition so the service layer can emit an MQTT
+        # error event.  The camera_name is not available here, so keep the message
+        # generic; callers that know the camera name should set _last_ai_error
+        # directly after a failed grab_snapshots call returns an empty list.
+        _last_ai_error = "No snapshots available from Frigate — image fetch returned empty list"
         return "A person was detected but could not be described."
 
     ai_cfg = config.get("ai", {})
+
+    # Track per-role errors so we can compose a combined error string when both fail.
+    primary_provider: str = ""
+    primary_error: str = ""
+    fallback_provider: str = ""
+    fallback_error: str = ""
 
     # Try primary provider, then fall back.
     for role in ("primary", "fallback"):
@@ -845,18 +883,38 @@ async def analyze_snapshots(
                 images, prompt, provider, provider_cfg, api_key, model, timeout
             )
             logger.info("%s provider %r snapshot analysis succeeded", role, provider)
+            # Clear any previous error — this analysis succeeded.
+            _last_ai_error = ""
             return result
         except Exception as exc:
+            exc_str = str(exc)
             if role == "primary":
+                primary_provider = provider
+                primary_error = exc_str
                 logger.warning(
                     "Primary provider %r snapshot analysis failed: %s — trying fallback",
                     provider, exc,
                 )
             else:
+                fallback_provider = provider
+                fallback_error = exc_str
                 logger.error(
                     "Fallback provider %r snapshot analysis also failed: %s",
                     provider, exc,
                 )
+
+    # Both providers failed (or were not configured) — record the combined error.
+    if primary_provider and fallback_provider:
+        _last_ai_error = (
+            f"Primary ({primary_provider}): {primary_error}; "
+            f"Fallback ({fallback_provider}): {fallback_error}"
+        )
+    elif primary_provider:
+        _last_ai_error = f"Primary ({primary_provider}): {primary_error}"
+    elif fallback_provider:
+        _last_ai_error = f"Fallback ({fallback_provider}): {fallback_error}"
+    else:
+        _last_ai_error = "No AI providers configured or all have invalid API keys"
 
     return "A person was detected on camera."
 
@@ -1177,19 +1235,38 @@ async def _call_gemini_images(
     )
 
     session = await _get_session()
-    async with session.post(
-        url, json=payload, timeout=aiohttp.ClientTimeout(total=timeout_seconds)
-    ) as resp:
-        if resp.status == 400:
-            body = await resp.json()
-            error = body.get("error", {}).get("message", "Unknown error")
-            raise ValueError(f"Gemini API error (400): {error}")
-        if resp.status != 200:
-            body_text = await resp.text()
-            raise ValueError(
-                f"Gemini API returned HTTP {resp.status}: {body_text[:200]}"
-            )
-        data = await resp.json()
+    try:
+        async with session.post(
+            url, json=payload, timeout=aiohttp.ClientTimeout(total=timeout_seconds)
+        ) as resp:
+            if resp.status == 400:
+                body = await resp.json()
+                error = body.get("error", {}).get("message", "Unknown error")
+                raise ValueError(f"Gemini API error (400): {error}")
+            if resp.status in (401, 403):
+                raise ValueError(
+                    f"Gemini: Authentication failed (HTTP {resp.status}) — "
+                    "check your API key"
+                )
+            if resp.status == 429:
+                raise ValueError(
+                    "Gemini: Rate limit exceeded (HTTP 429) — too many requests "
+                    "or quota exhausted"
+                )
+            if resp.status != 200:
+                body_text = await resp.text()
+                raise ValueError(
+                    f"Gemini API returned HTTP {resp.status}: {body_text[:200]}"
+                )
+            data = await resp.json()
+    except aiohttp.ClientConnectorError as exc:
+        raise ValueError(
+            f"Gemini: Server unreachable — connection refused or DNS failure: {exc}"
+        ) from exc
+    except TimeoutError as exc:
+        raise ValueError(
+            f"Gemini: Request timed out after {timeout_seconds}s"
+        ) from exc
 
     # Extract the generated text from the response structure:
     #   {"candidates": [{"content": {"parts": [{"text": "..."}]}}]}
@@ -1471,13 +1548,33 @@ async def _call_ollama(
                  generate_url, model_name, len(image))
 
     session = await _get_session()
-    async with session.post(generate_url, json=payload, timeout=http_timeout) as resp:
-        if resp.status != 200:
-            body = await resp.text()
-            raise ValueError(
-                f"Ollama returned HTTP {resp.status}: {body[:200]}"
-            )
-        data = await resp.json()
+    try:
+        async with session.post(generate_url, json=payload, timeout=http_timeout) as resp:
+            if resp.status == 404:
+                raise ValueError(
+                    f"Ollama model {model_name!r} not found at {ollama_host} — "
+                    f"run: ollama pull {model_name}"
+                )
+            if resp.status == 429:
+                raise ValueError(
+                    f"Ollama: Rate limit exceeded (HTTP 429) from {generate_url}"
+                )
+            if resp.status != 200:
+                body = await resp.text()
+                raise ValueError(
+                    f"Ollama returned HTTP {resp.status}: {body[:200]}"
+                )
+            data = await resp.json()
+    except aiohttp.ClientConnectorError as exc:
+        raise ValueError(
+            f"Ollama server at {ollama_host} is not reachable — is Ollama running? "
+            f"({exc})"
+        ) from exc
+    except TimeoutError as exc:
+        raise ValueError(
+            f"Ollama: Request timed out after {timeout_seconds}s for model "
+            f"{model_name!r} at {ollama_host}"
+        ) from exc
 
     # Ollama's non-streaming response puts the full text in the "response" key.
     response_text: str = data.get("response", "").strip()
@@ -1577,26 +1674,47 @@ async def _call_openai_compat(
     )
 
     session = await _get_session()
-    async with session.post(
-        completions_url, json=payload, headers=headers, timeout=http_timeout
-    ) as resp:
-        if resp.status == 401:
-            raise ValueError(
-                f"OpenAI-compat: HTTP 401 from {completions_url} — "
-                "check your API key"
-            )
-        if resp.status == 404:
-            raise ValueError(
-                f"OpenAI-compat: HTTP 404 from {completions_url} — "
-                f"model {model!r} not found"
-            )
-        if resp.status != 200:
-            body = await resp.text()
-            raise ValueError(
-                f"OpenAI-compat: HTTP {resp.status} from {completions_url}: "
-                f"{body[:200]}"
-            )
-        data = await resp.json()
+    try:
+        async with session.post(
+            completions_url, json=payload, headers=headers, timeout=http_timeout
+        ) as resp:
+            if resp.status == 401:
+                raise ValueError(
+                    f"OpenAI-compat: Authentication failed (HTTP 401) from "
+                    f"{completions_url} — Invalid API key"
+                )
+            if resp.status == 403:
+                raise ValueError(
+                    f"OpenAI-compat: Authentication failed (HTTP 403) from "
+                    f"{completions_url} — check your API key or account permissions"
+                )
+            if resp.status == 404:
+                raise ValueError(
+                    f"OpenAI-compat: HTTP 404 from {completions_url} — "
+                    f"model {model!r} not found"
+                )
+            if resp.status == 429:
+                raise ValueError(
+                    f"OpenAI-compat: Rate limit exceeded (HTTP 429) from "
+                    f"{completions_url} — too many requests or quota exhausted"
+                )
+            if resp.status != 200:
+                body = await resp.text()
+                raise ValueError(
+                    f"OpenAI-compat: HTTP {resp.status} from {completions_url}: "
+                    f"{body[:200]}"
+                )
+            data = await resp.json()
+    except aiohttp.ClientConnectorError as exc:
+        raise ValueError(
+            f"OpenAI-compat: Connection refused or server unreachable at "
+            f"{completions_url}: {exc}"
+        ) from exc
+    except TimeoutError as exc:
+        raise ValueError(
+            f"OpenAI-compat: Request timed out after {timeout}s for "
+            f"{completions_url}"
+        ) from exc
 
     # Navigate the standard OpenAI response structure.
     try:
@@ -1703,23 +1821,43 @@ async def _call_anthropic(
     )
 
     session = await _get_session()
-    async with session.post(
-        messages_url, json=payload, headers=headers, timeout=http_timeout
-    ) as resp:
-        if resp.status == 401:
-            raise ValueError(
-                "Anthropic: HTTP 401 — check your API key"
-            )
-        if resp.status == 404:
-            raise ValueError(
-                f"Anthropic: HTTP 404 — model {model!r} not found"
-            )
-        if resp.status != 200:
-            body = await resp.text()
-            raise ValueError(
-                f"Anthropic: HTTP {resp.status}: {body[:200]}"
-            )
-        data = await resp.json()
+    try:
+        async with session.post(
+            messages_url, json=payload, headers=headers, timeout=http_timeout
+        ) as resp:
+            if resp.status == 401:
+                raise ValueError(
+                    "Anthropic: Authentication failed (HTTP 401) — Invalid API key"
+                )
+            if resp.status == 403:
+                raise ValueError(
+                    "Anthropic: Authentication failed (HTTP 403) — check your API key "
+                    "or account permissions"
+                )
+            if resp.status == 404:
+                raise ValueError(
+                    f"Anthropic: HTTP 404 — model {model!r} not found"
+                )
+            if resp.status == 429:
+                raise ValueError(
+                    "Anthropic: Rate limit exceeded (HTTP 429) — too many requests "
+                    "or quota exhausted"
+                )
+            if resp.status != 200:
+                body = await resp.text()
+                raise ValueError(
+                    f"Anthropic: HTTP {resp.status}: {body[:200]}"
+                )
+            data = await resp.json()
+    except aiohttp.ClientConnectorError as exc:
+        raise ValueError(
+            f"Anthropic: Connection refused or server unreachable at "
+            f"{messages_url}: {exc}"
+        ) from exc
+    except TimeoutError as exc:
+        raise ValueError(
+            f"Anthropic: Request timed out after {timeout}s"
+        ) from exc
 
     # Anthropic's response puts the text in content[0].text.
     try:

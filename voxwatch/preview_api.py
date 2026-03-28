@@ -272,6 +272,7 @@ class PreviewAPI:
         actual_provider = preview_config.get("tts", {}).get("provider", "piper")
         configured_provider = tts_override.get("provider", actual_provider)
         used_fallback = "false"
+        fallback_reason = ""
 
         # Check if the pipeline silently switched providers during generation.
         if hasattr(self._audio, "_tts_provider") and self._audio._tts_provider:
@@ -281,6 +282,9 @@ class PreviewAPI:
         # If the actual provider differs from what was configured, flag it.
         if actual_provider != configured_provider:
             used_fallback = "true"
+        # Capture the reason the primary provider failed (if any).
+        if hasattr(self._audio, "_last_fallback_reason"):
+            fallback_reason = self._audio._last_fallback_reason or ""
 
         try:
             with open(wav_path, "rb") as fh:
@@ -304,15 +308,19 @@ class PreviewAPI:
             len(wav_bytes),
         )
 
+        headers = {
+            "X-Generation-Time-Ms": str(elapsed_ms),
+            "X-TTS-Provider": actual_provider,
+            "X-TTS-Configured": configured_provider,
+            "X-TTS-Fallback": used_fallback,
+        }
+        if fallback_reason:
+            headers["X-TTS-Fallback-Reason"] = fallback_reason
+
         return web.Response(
             body=wav_bytes,
             content_type="audio/wav",
-            headers={
-                "X-Generation-Time-Ms": str(elapsed_ms),
-                "X-TTS-Provider": actual_provider,
-                "X-TTS-Configured": configured_provider,
-                "X-TTS-Fallback": used_fallback,
-            },
+            headers=headers,
         )
 
     async def _handle_generate_intro(self, request: web.Request) -> web.Response:
@@ -626,7 +634,7 @@ class PreviewAPI:
         try:
             fd2, output_path = tempfile.mkstemp(suffix=".wav", prefix="voxwatch_announce_out_")
             os.close(fd2)
-        except OSError as exc:
+        except OSError:
             with contextlib.suppress(OSError):
                 os.unlink(tts_path)
             return web.json_response(

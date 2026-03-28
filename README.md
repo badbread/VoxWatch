@@ -91,15 +91,6 @@ Control not just *what* is said, but *how* it's said. 14 built-in response modes
 | **silent_pressure** | Delayed, tension-building response |
 | **evidence_collection** | Emphasizes forensic evidence capture |
 
-### Fun / Novelty
-
-| Mode | Persona |
-|------|---------|
-| **mafioso** | Italian-American wiseguy. *"You picked the wrong house, pal."* |
-| **tony_montana** | Scarface energy — aggressive, territorial |
-| **pirate_captain** | *"What scallywag dares approach me vessel?"* |
-| **disappointed_parent** | Guilt-tripping. *"Really? At this hour?"* |
-
 ### Custom Mode
 
 Write your own persona via `response_mode.custom_prompt` in config. Full control over tone, vocabulary, and escalation style.

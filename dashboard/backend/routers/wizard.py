@@ -33,7 +33,6 @@ import re
 import time
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import FileResponse
@@ -54,12 +53,12 @@ router = APIRouter(prefix="/wizard", tags=["Wizard"])
 # translation used by the detect endpoint (RTSP -> ffmpeg for the response)
 # and potentially by the VoxWatch audio pipeline.
 
-RTSP_TO_FFMPEG: Dict[str, str] = {
+RTSP_TO_FFMPEG: dict[str, str] = {
     "PCMU": "pcm_mulaw",   # G.711 µ-law, 8 kHz — most common camera codec
     "PCMA": "pcm_alaw",    # G.711 A-law, 8 kHz — European / Hikvision cameras
 }
 
-FFMPEG_TO_RTSP: Dict[str, str] = {v: k for k, v in RTSP_TO_FFMPEG.items()}
+FFMPEG_TO_RTSP: dict[str, str] = {v: k for k, v in RTSP_TO_FFMPEG.items()}
 
 # ── Temp directory for wizard-generated audio files ───────────────────────────
 # Files are served back to go2rtc from this directory via GET /serve/{filename}.
@@ -81,7 +80,7 @@ logger.debug("Wizard temp directory ready: %s", WIZARD_TEMP_DIR)
 
 _RATE_LIMIT_MAX: int = 5
 _RATE_LIMIT_WINDOW: float = 60.0  # seconds
-_push_timestamps: Dict[str, List[float]] = defaultdict(list)
+_push_timestamps: dict[str, list[float]] = defaultdict(list)
 
 # ── Filename validation for the serve endpoint ────────────────────────────────
 # Only allow filenames that consist of safe characters and end in .wav.
@@ -246,11 +245,11 @@ class DetectResponse(BaseModel):
     camera_name: str
     stream_name: str
     has_backchannel: bool
-    codecs: List[str]
-    recommended_codec: Optional[str]
-    frigate_online: Optional[bool]
-    fps: Optional[float]
-    snapshot_url: Optional[str]
+    codecs: list[str]
+    recommended_codec: str | None
+    frigate_online: bool | None
+    fps: float | None
+    snapshot_url: str | None
 
 
 class TestAudioRequest(BaseModel):
@@ -321,18 +320,18 @@ class SaveRequest(BaseModel):
             "camera config block.  Typically matches camera_name."
         )
     )
-    audio_codec: Optional[str] = Field(
+    audio_codec: str | None = Field(
         default=None,
         description=(
             "ffmpeg codec string for the camera's backchannel (e.g. 'pcm_mulaw'). "
             "Stored as 'audio_codec'.  None means use the VoxWatch service default."
         ),
     )
-    sample_rate: Optional[int] = Field(
+    sample_rate: int | None = Field(
         default=None,
         description="Audio sample rate in Hz (e.g. 8000).  None uses service default.",
     )
-    channels: Optional[int] = Field(
+    channels: int | None = Field(
         default=None,
         description="Audio channel count (1 = mono, 2 = stereo).  None uses service default.",
     )
@@ -459,24 +458,24 @@ async def detect_camera(request: DetectRequest) -> DetectResponse:
 
     stream_info = backchannel_map[stream_name]
     has_backchannel: bool = stream_info.get("has_backchannel", False)
-    raw_codecs: List[str] = stream_info.get("codecs", [])  # e.g. ["PCMU/8000", "PCMA/8000"]
+    raw_codecs: list[str] = stream_info.get("codecs", [])  # e.g. ["PCMU/8000", "PCMA/8000"]
 
     # Translate RTSP codec names (e.g. "PCMU/8000") to ffmpeg names ("pcm_mulaw").
     # The RTSP codec string includes the sample rate as a suffix after "/".
     # We strip the suffix before looking up the base codec name.
-    ffmpeg_codecs: List[str] = []
+    ffmpeg_codecs: list[str] = []
     for rtsp_codec in raw_codecs:
         base = rtsp_codec.split("/")[0].upper()  # "PCMU/8000" -> "PCMU"
         ffmpeg_name = RTSP_TO_FFMPEG.get(base)
         if ffmpeg_name and ffmpeg_name not in ffmpeg_codecs:
             ffmpeg_codecs.append(ffmpeg_name)
 
-    recommended_codec: Optional[str] = ffmpeg_codecs[0] if ffmpeg_codecs else None
+    recommended_codec: str | None = ffmpeg_codecs[0] if ffmpeg_codecs else None
 
     # ── Query Frigate for camera stats ────────────────────────────────────────
     # These are best-effort; Frigate being unreachable should not block the wizard.
-    frigate_online: Optional[bool] = None
-    fps: Optional[float] = None
+    frigate_online: bool | None = None
+    fps: float | None = None
 
     if fc_module.frigate_client is not None:
         try:
@@ -619,7 +618,7 @@ async def test_audio_push(request: TestAudioRequest) -> TestAudioResponse:
     rc, _, stderr = await _run_ffmpeg(
         "-y",
         "-f", "lavfi",
-        "-i", f"sine=frequency=800:duration=1.5",
+        "-i", "sine=frequency=800:duration=1.5",
         "-acodec", request.codec,
         "-ar", str(request.sample_rate),
         "-ac", "1",
@@ -884,7 +883,7 @@ async def save_camera_config(request: SaveRequest) -> SaveResponse:
 
     # ── Build the camera config block ─────────────────────────────────────────
     # Always-present fields: these are what the wizard primarily collects.
-    camera_block: Dict = {
+    camera_block: dict = {
         "go2rtc_stream": request.go2rtc_stream,
         "enabled": request.enabled,
         "scene_context": request.scene_context,

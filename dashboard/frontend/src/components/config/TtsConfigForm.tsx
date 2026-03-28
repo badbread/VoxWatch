@@ -508,6 +508,8 @@ function TestVoiceButton({
         {...(previewMutation.data?.fallbackUsed != null ? { fallbackUsed: previewMutation.data.fallbackUsed } : {})}
         {...(previewMutation.data?.actualProvider ? { actualProvider: previewMutation.data.actualProvider } : {})}
         configuredProvider={engine}
+        {...(previewMutation.data?.fallbackReason ? { fallbackReason: previewMutation.data.fallbackReason } : {})}
+        proxyFallback={previewMutation.data?.proxyFallback ?? false}
       />
 
       {/* Test Voice button — triggers synthesis; becomes "Test again" after success */}

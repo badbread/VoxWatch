@@ -29,7 +29,7 @@ import re
 import tempfile
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 import yaml
 from pydantic import ValidationError
@@ -73,7 +73,7 @@ _MASK_VALUE = "***MASKED***"
 _ENV_TOKEN_RE = re.compile(r"^\$\{[^}]+\}$")
 
 
-def _mask_dict(data: Dict[str, Any]) -> Dict[str, Any]:
+def _mask_dict(data: dict[str, Any]) -> dict[str, Any]:
     """Return a deep copy of *data* with sensitive paths replaced by the mask.
 
     Only values that are NOT already ${ENV_VAR} tokens are replaced — tokens
@@ -130,7 +130,7 @@ class ConfigService:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    async def get_config(self) -> Dict[str, Any]:
+    async def get_config(self) -> dict[str, Any]:
         """Read and return the current config with sensitive fields masked.
 
         Reads the raw YAML, preserving ${ENV_VAR} tokens. Parses through
@@ -157,7 +157,7 @@ class ConfigService:
         data = parsed.model_dump()
         return _mask_dict(data)
 
-    async def get_raw_config(self) -> Dict[str, Any]:
+    async def get_raw_config(self) -> dict[str, Any]:
         """Read the raw config without masking sensitive fields.
 
         Used internally for operations that need real API keys (e.g. AI provider
@@ -168,7 +168,7 @@ class ConfigService:
         """
         return self._read_raw_yaml()
 
-    async def validate_config(self, data: Dict[str, Any]) -> ConfigValidationResult:
+    async def validate_config(self, data: dict[str, Any]) -> ConfigValidationResult:
         """Validate a config dict without saving it.
 
         Runs the incoming data through the Pydantic model and collects all
@@ -235,7 +235,7 @@ class ConfigService:
 
         return ConfigValidationResult(valid=True, errors=errors, warnings=warnings)
 
-    async def save_config(self, data: Dict[str, Any]) -> None:
+    async def save_config(self, data: dict[str, Any]) -> None:
         """Atomically write a new config to config.yaml.
 
         Steps:
@@ -290,7 +290,7 @@ class ConfigService:
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
-    def _read_raw_yaml(self) -> Dict[str, Any]:
+    def _read_raw_yaml(self) -> dict[str, Any]:
         """Read config.yaml and return the raw parsed dict.
 
         ${ENV_VAR} tokens are NOT resolved — they are kept as literal strings.
@@ -314,7 +314,7 @@ class ConfigService:
                 raise ValueError(f"Failed to parse config.yaml: {exc}") from exc
         return raw
 
-    async def _merge_masked_fields(self, incoming: Dict[str, Any]) -> Dict[str, Any]:
+    async def _merge_masked_fields(self, incoming: dict[str, Any]) -> dict[str, Any]:
         """Replace mask placeholders in *incoming* with the real values from disk.
 
         When the browser submits a config update, masked fields (like api_key)

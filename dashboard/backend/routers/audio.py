@@ -43,7 +43,6 @@ import tempfile
 import time
 from collections import defaultdict
 from pathlib import Path
-from typing import Optional
 
 import aiohttp
 from fastapi import APIRouter, HTTPException, UploadFile, status
@@ -151,7 +150,7 @@ class TestAudioRequest(BaseModel):
         description="Message text to synthesize and push (kept short for testing)",
         max_length=200,
     )
-    audio_server_url: Optional[str] = Field(
+    audio_server_url: str | None = Field(
         default=None,
         description=(
             "Base URL of the VoxWatch audio HTTP server "
@@ -298,21 +297,21 @@ class AnnounceRequest(BaseModel):
         description="Text to synthesise and play on the camera speaker.",
         max_length=1000,
     )
-    voice: Optional[str] = Field(
+    voice: str | None = Field(
         default=None,
         description="TTS voice override. Uses configured default when omitted.",
     )
-    provider: Optional[str] = Field(
+    provider: str | None = Field(
         default=None,
         description="TTS provider override (kokoro, piper, elevenlabs, etc.).",
     )
-    speed: Optional[float] = Field(
+    speed: float | None = Field(
         default=None,
         description="Playback speed multiplier (0.25–4.0).",
         ge=0.25,
         le=4.0,
     )
-    tone: Optional[str] = Field(
+    tone: str | None = Field(
         default=None,
         description="Attention tone to prepend: 'short', 'long', 'siren', or 'none'.",
     )
@@ -323,11 +322,11 @@ class AnnounceResponse(BaseModel):
 
     success: bool = Field(description="Whether the announcement was played")
     camera: str = Field(description="Camera the announcement was sent to")
-    duration_ms: Optional[int] = Field(
+    duration_ms: int | None = Field(
         default=None,
         description="Total processing time in milliseconds",
     )
-    error: Optional[str] = Field(
+    error: str | None = Field(
         default=None,
         description="Error message if the announcement failed",
     )
@@ -489,7 +488,7 @@ class PreviewRequest(BaseModel):
 
     persona: str = Field(
         default="standard",
-        description="Persona name from the PERSONAS dict (e.g. 'mafioso', 'drill_sergeant').",
+        description="Persona name from the PERSONAS dict (e.g. 'private_security', 'police_dispatch').",
     )
     voice: str = Field(
         default="af_heart",
@@ -499,14 +498,14 @@ class PreviewRequest(BaseModel):
         default="kokoro",
         description="TTS provider name: 'kokoro', 'piper', 'espeak'.",
     )
-    provider_host: Optional[str] = Field(
+    provider_host: str | None = Field(
         default=None,
         description=(
             "Base URL of the remote TTS server (e.g. 'http://kokoro-server:8880'). "
             "Required for Kokoro remote. Ignored for piper/espeak."
         ),
     )
-    message: Optional[str] = Field(
+    message: str | None = Field(
         default=None,
         description=(
             "Custom message text to synthesize. "
@@ -605,7 +604,7 @@ def _sample_for_persona(persona: str) -> str:
     custom persona names don't blow up.
 
     Args:
-        persona: Persona key string (e.g. "mafioso", "drill_sergeant").
+        persona: Persona key string (e.g. "private_security", "police_dispatch").
 
     Returns:
         Sample deterrent message string, ready to pass to a TTS provider.
@@ -722,7 +721,7 @@ async def _synthesize_piper(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="piper binary not found. Ensure piper is installed in the Docker image.",
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         raise HTTPException(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
             detail="piper synthesis timed out after 30 seconds.",
@@ -781,7 +780,7 @@ async def _synthesize_espeak(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="espeak-ng binary not found. Install espeak-ng in the Docker image.",
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         raise HTTPException(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
             detail="espeak-ng synthesis timed out after 15 seconds.",
@@ -791,29 +790,43 @@ async def _synthesize_espeak(
 async def _resolve_cloud_tts_key(key_name: str) -> str:
     """Resolve a cloud TTS API key from the saved config.
 
-    Reads the flat TTS config (e.g. tts.elevenlabs_api_key) and resolves
+    Checks both nested config (e.g. tts.openai.api_key) and flat config
+    (e.g. tts.openai_api_key) for backwards compatibility, and resolves
     ${ENV_VAR} tokens to actual values.
 
     Args:
-        key_name: The flat config key name (e.g. "elevenlabs_api_key").
+        key_name: The config key name, either flat (e.g. "openai_api_key")
+            or the provider name will be extracted to check nested config.
 
     Returns:
         The resolved API key, or empty string if not found.
     """
     import os
     import re
-    try:
-        raw_cfg = await config_service.get_raw_config()
-        tts = raw_cfg.get("tts", {})
-        val = tts.get(key_name, "")
-        if not val or not isinstance(val, str):
+
+    def _resolve(val: str) -> str:
+        if not val or not isinstance(val, str) or val.startswith("***"):
             return ""
         env_match = re.match(r"\$\{(\w+)\}", val)
         if env_match:
             return os.environ.get(env_match.group(1), "")
-        if val.startswith("***"):
-            return ""
         return val
+
+    try:
+        raw_cfg = await config_service.get_raw_config()
+        tts = raw_cfg.get("tts", {})
+
+        # Try nested config first: tts.<provider>.api_key
+        # Extract provider name from key_name (e.g. "openai_api_key" -> "openai")
+        provider = key_name.replace("_api_key", "")
+        nested = tts.get(provider, {})
+        if isinstance(nested, dict):
+            resolved = _resolve(nested.get("api_key", ""))
+            if resolved:
+                return resolved
+
+        # Fall back to flat config: tts.<key_name>
+        return _resolve(tts.get(key_name, ""))
     except Exception:
         return ""
 
@@ -866,10 +879,15 @@ async def _synthesize_elevenlabs(
     proc = await asyncio.create_subprocess_exec(
         "ffmpeg", "-y", "-i", "pipe:0", "-f", "wav", output_path,
         stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.DEVNULL,
-        stderr=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
     )
-    await proc.communicate(input=audio_data)
+    _, stderr_data = await proc.communicate(input=audio_data)
+    if proc.returncode != 0:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Audio conversion failed: {stderr_data.decode('utf-8', errors='replace')[-200:]}",
+        )
 
 
 async def _synthesize_openai_tts(
@@ -991,7 +1009,7 @@ async def _get_voxwatch_preview_url() -> str:
 
 async def _proxy_dispatch_preview(
     request: "PreviewRequest",
-) -> Optional[tuple[bytes, dict[str, str]]]:
+) -> tuple[bytes, dict[str, str]] | None:
     """Proxy a preview request to the VoxWatch Preview API.
 
     Forwards the preview request body to the VoxWatch service on port 8892 and
@@ -1046,6 +1064,9 @@ async def _proxy_dispatch_preview(
                     "X-TTS-Configured": resp.headers.get("X-TTS-Configured", request.provider),
                     "X-TTS-Fallback": resp.headers.get("X-TTS-Fallback", "false"),
                 }
+                fallback_reason = resp.headers.get("X-TTS-Fallback-Reason", "")
+                if fallback_reason:
+                    proxy_headers["X-TTS-Fallback-Reason"] = fallback_reason
                 elapsed_ms = proxy_headers["X-Generation-Time-Ms"]
                 logger.info(
                     "Preview received from VoxWatch: %s ms, mode=%s provider=%s",
@@ -1063,7 +1084,7 @@ async def _proxy_dispatch_preview(
             exc,
         )
         return None
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.warning(
             "VoxWatch Preview API timed out after %.0fs — falling back to local synthesis.",
             _VOXWATCH_PROXY_TIMEOUT,
@@ -1180,16 +1201,22 @@ async def preview_audio(request: PreviewRequest) -> StreamingResponse:
                 elapsed_ms,
                 len(wav_bytes),
             )
+            resp_headers = {
+                "X-Generation-Time": str(elapsed_ms),
+                "X-TTS-Provider": proxy_headers.get("X-TTS-Provider", configured_provider),
+                "X-TTS-Configured": proxy_headers.get("X-TTS-Configured", configured_provider),
+                "X-TTS-Fallback": proxy_headers.get("X-TTS-Fallback", "false"),
+                "X-VoxWatch-Proxy": "proxied",
+                "Cache-Control": "no-store",
+            }
+            # Forward the fallback reason so the frontend can display it.
+            fallback_reason = proxy_headers.get("X-TTS-Fallback-Reason", "")
+            if fallback_reason:
+                resp_headers["X-TTS-Fallback-Reason"] = fallback_reason
             return StreamingResponse(
                 content=iter([wav_bytes]),
                 media_type="audio/wav",
-                headers={
-                    "X-Generation-Time": str(elapsed_ms),
-                    "X-TTS-Provider": proxy_headers.get("X-TTS-Provider", configured_provider),
-                    "X-TTS-Configured": proxy_headers.get("X-TTS-Configured", configured_provider),
-                    "X-TTS-Fallback": proxy_headers.get("X-TTS-Fallback", "false"),
-                    "Cache-Control": "no-store",
-                },
+                headers=resp_headers,
             )
         # VoxWatch unreachable — fall through to local synthesis so the user
         # still hears something (plain TTS without the full dispatch experience).
@@ -1498,6 +1525,7 @@ async def preview_audio(request: PreviewRequest) -> StreamingResponse:
                 "X-TTS-Provider": actual_provider,
                 "X-TTS-Configured": configured_provider,
                 "X-TTS-Fallback": "true" if used_fallback else "false",
+                "X-VoxWatch-Proxy": "local-fallback",
                 "Cache-Control": "no-store",
             },
         )
@@ -1522,7 +1550,7 @@ class TestTtsProviderRequest(BaseModel):
             "The provider name is case-insensitive."
         )
     )
-    api_key: Optional[str] = Field(
+    api_key: str | None = Field(
         default=None,
         description=(
             "API key to test.  If omitted the key is read from the saved config "
@@ -1530,7 +1558,7 @@ class TestTtsProviderRequest(BaseModel):
             "to test a new key before saving it to config."
         ),
     )
-    voice_id: Optional[str] = Field(
+    voice_id: str | None = Field(
         default=None,
         description=(
             "Optional voice identifier to validate.  Currently unused for the "
@@ -1722,7 +1750,7 @@ async def test_tts_provider(request: TestTtsProviderRequest) -> TestTtsProviderR
             message=f"Network error reaching {provider} API: {exc}",
             latency_ms=latency_ms,
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         latency_ms = int((_time.monotonic() - start) * 1000)
         logger.warning("test-tts-provider: timeout for %s", provider)
         return TestTtsProviderResult(
@@ -1763,7 +1791,7 @@ _INTRO_UPLOAD_MAX_BYTES = 10 * 1024 * 1024
 _INTRO_UPLOAD_DEST = "/config/audio/dispatch_intro.wav"
 
 
-def _detect_audio_format(header: bytes) -> Optional[str]:
+def _detect_audio_format(header: bytes) -> str | None:
     """Identify the audio format from the first few bytes of a file.
 
     Checks the file's magic bytes against the known audio signatures.
@@ -1939,14 +1967,14 @@ class GenerateIntroRequest(BaseModel):
         min_length=1,
         max_length=400,
     )
-    provider: Optional[str] = Field(
+    provider: str | None = Field(
         default=None,
         description=(
             "TTS provider override: 'kokoro', 'elevenlabs', 'openai', 'cartesia', "
             "'piper', 'espeak'. When omitted, the currently configured provider is used."
         ),
     )
-    voice: Optional[str] = Field(
+    voice: str | None = Field(
         default=None,
         description=(
             "Provider-specific voice identifier. "
@@ -2081,7 +2109,7 @@ async def generate_intro_audio(request: GenerateIntroRequest) -> StreamingRespon
                     resp.status,
                     body_text[:200],
                 )
-    except (aiohttp.ClientConnectorError, asyncio.TimeoutError) as exc:
+    except (TimeoutError, aiohttp.ClientConnectorError) as exc:
         logger.info(
             "generate-intro: VoxWatch Preview API unreachable (%s) — "
             "falling back to local cloud synthesis.",
@@ -2218,7 +2246,7 @@ async def generate_intro_audio(request: GenerateIntroRequest) -> StreamingRespon
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-async def _get_stream_name(camera_name: str) -> Optional[str]:
+async def _get_stream_name(camera_name: str) -> str | None:
     """Resolve the go2rtc stream name for a camera.
 
     Resolution order:

@@ -81,24 +81,30 @@ class CartesiaProvider(TTSProvider):
             )
 
         tts_cfg = config.get("tts", {})
+        # Provider-specific sub-dict (nested config: tts.cartesia.api_key, etc.)
+        cart_cfg = tts_cfg.get("cartesia", {})
 
         api_key: str | None = (
-            tts_cfg.get("cartesia_api_key")
+            cart_cfg.get("api_key")
+            or tts_cfg.get("cartesia_api_key")
             or os.environ.get("CARTESIA_API_KEY")
         )
+        # Skip unresolved ${ENV_VAR} tokens
+        if api_key and api_key.startswith("${"):
+            api_key = os.environ.get("CARTESIA_API_KEY")
         if not api_key:
             raise TTSProviderError(
                 self.name,
-                "No API key found. Set tts.cartesia_api_key in config.yaml "
+                "No API key found. Set tts.cartesia.api_key in config.yaml "
                 "or the CARTESIA_API_KEY environment variable.",
             )
 
         self._api_key: str = api_key
-        self._voice_id: str = tts_cfg.get("cartesia_voice_id", _DEFAULT_VOICE_ID)
-        self._model: str = tts_cfg.get("cartesia_model", _DEFAULT_MODEL)
-        self._speed: str | float = tts_cfg.get("cartesia_speed", "normal")
-        self._emotion: list[str] = tts_cfg.get("cartesia_emotion", [])
-        self._timeout: int = int(tts_cfg.get("cartesia_timeout", 30))
+        self._voice_id: str = cart_cfg.get("voice_id") or tts_cfg.get("cartesia_voice_id", _DEFAULT_VOICE_ID)
+        self._model: str = cart_cfg.get("model") or tts_cfg.get("cartesia_model", _DEFAULT_MODEL)
+        self._speed: str | float = cart_cfg.get("speed") or tts_cfg.get("cartesia_speed", "normal")
+        self._emotion: list[str] = cart_cfg.get("emotion") or tts_cfg.get("cartesia_emotion", [])
+        self._timeout: int = int(cart_cfg.get("timeout") or tts_cfg.get("cartesia_timeout", 30))
 
         logger.debug(
             "CartesiaProvider ready: voice=%s model=%s speed=%s",

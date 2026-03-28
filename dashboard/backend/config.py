@@ -34,7 +34,6 @@ import platform
 import sys
 from pathlib import Path
 
-
 # ── VoxWatch data paths ───────────────────────────────────────────────────────
 
 # Path to VoxWatch config.yaml — read and written by config_service.py

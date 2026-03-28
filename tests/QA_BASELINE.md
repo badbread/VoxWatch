@@ -456,7 +456,7 @@ Sits under the top-level speech key in config.yaml. All 11 parameters from Caden
 
 
 
-### Built-in Modes (13 total)
+### Built-in Modes (9 total)
 
 | ID | Category | Name |
 | ---- | --------- | ------ |
@@ -469,10 +469,6 @@ Sits under the top-level speech key in config.yaml. All 11 parameters from Caden
 | silent_pressure | advanced | Silent Pressure |
 | neighborhood_alert | advanced | Neighborhood Alert |
 | automated_surveillance | advanced | Automated Surveillance |
-| mafioso | novelty | Mafioso |
-| disappointed_parent | novelty | Disappointed Parent |
-| pirate_captain | novelty | Pirate Captain |
-| tony_montana | novelty | Tony Montana |
 
 ### loader.py Public API
 

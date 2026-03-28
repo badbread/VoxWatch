@@ -38,9 +38,9 @@ Environment variables:
 
 import logging
 import os
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import AsyncGenerator, Optional
 
 import aiohttp
 from fastapi import Depends, FastAPI, HTTPException, Security, status
@@ -82,7 +82,7 @@ logger = logging.getLogger("dashboard.main")
 # request to avoid repeated os.environ lookups and to make the "no auth"
 # decision explicit and visible at startup.
 
-_API_KEY: Optional[str] = os.environ.get("DASHBOARD_API_KEY") or None
+_API_KEY: str | None = os.environ.get("DASHBOARD_API_KEY") or None
 
 # HTTPBearer extracts the token from the "Authorization: Bearer <token>" header.
 # auto_error=False means it returns None instead of raising 403 when the header
@@ -92,7 +92,7 @@ _bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def _require_api_key(
-    credentials: Optional[HTTPAuthorizationCredentials] = Security(_bearer_scheme),
+    credentials: HTTPAuthorizationCredentials | None = Security(_bearer_scheme),
 ) -> None:
     """FastAPI dependency that enforces Bearer token authentication on /api/* routes.
 
@@ -300,9 +300,9 @@ _enable_docs_raw: str = os.environ.get("ENABLE_DOCS", "true").strip().lower()
 _docs_enabled: bool = _enable_docs_raw not in ("false", "0", "no", "off")
 
 if _docs_enabled:
-    _docs_url: Optional[str] = "/api/docs"
-    _redoc_url: Optional[str] = "/api/redoc"
-    _openapi_url: Optional[str] = "/api/openapi.json"
+    _docs_url: str | None = "/api/docs"
+    _redoc_url: str | None = "/api/redoc"
+    _openapi_url: str | None = "/api/openapi.json"
 else:
     # Setting these to None tells FastAPI not to register the routes at all.
     _docs_url = None

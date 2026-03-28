@@ -32,6 +32,25 @@ import { Play, Pause, Volume2, AlertCircle } from 'lucide-react';
 import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { cn } from '@/utils/cn';
 
+/**
+ * Extract a user-friendly message from the raw fallback reason string.
+ *
+ * The backend sends error strings like:
+ *   "[openai] API returned HTTP 429: { \"message\": \"You exceeded your current quota...\" }"
+ *
+ * This extracts the most useful part for display in the UI.
+ */
+function formatFallbackReason(raw: string): string {
+  // Try to extract a "message" field from an embedded JSON object.
+  const msgMatch = raw.match(/"message"\s*:\s*"([^"]+)"/);
+  if (msgMatch?.[1]) return msgMatch[1];
+
+  // Strip the "[provider]" prefix if present.
+  const stripped = raw.replace(/^\[[\w-]+\]\s*/, '');
+  // Truncate very long messages.
+  return stripped.length > 200 ? stripped.slice(0, 200) + '...' : stripped;
+}
+
 /** Props for the AudioPreview component. */
 export interface AudioPreviewProps {
   /**
@@ -60,6 +79,18 @@ export interface AudioPreviewProps {
    * If omitted, the warning just names the actual provider without a "instead of" clause.
    */
   configuredProvider?: string;
+  /**
+   * Human-readable reason why the configured provider failed and a fallback
+   * was used.  Displayed below the fallback warning when present.
+   */
+  fallbackReason?: string;
+  /**
+   * When true, VoxWatch was unreachable and the dashboard generated the preview
+   * locally without routing through the VoxWatch audio pipeline.  This means
+   * dispatch effects (radio filter, beep, etc.) were not applied.
+   * Shows a warning banner explaining the preview is simplified.
+   */
+  proxyFallback?: boolean;
 }
 
 /**
@@ -87,6 +118,8 @@ export function AudioPreview({
   fallbackUsed,
   actualProvider,
   configuredProvider,
+  fallbackReason,
+  proxyFallback,
 }: AudioPreviewProps) {
   /** HTMLAudioElement instance used for playback. */
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -94,6 +127,8 @@ export function AudioPreview({
   const objectUrlRef = useRef<string | null>(null);
   /** Whether audio is currently playing. */
   const [isPlaying, setIsPlaying] = useState(false);
+  /** Playback error set when the audio element fails to decode or play the file. */
+  const [playbackError, setPlaybackError] = useState<string | null>(null);
 
   /**
    * Revoke the previous object URL and create a new one from the blob.
@@ -106,6 +141,7 @@ export function AudioPreview({
       objectUrlRef.current = null;
     }
     setIsPlaying(false);
+    setPlaybackError(null);
 
     if (!audioBlob) return;
 
@@ -117,6 +153,11 @@ export function AudioPreview({
       audioRef.current = new Audio();
     }
     audioRef.current.src = url;
+    // Set onerror before load() so decoding errors are captured immediately.
+    audioRef.current.onerror = () => {
+      setPlaybackError('Audio playback failed — the generated file may be corrupt');
+      setIsPlaying(false);
+    };
     audioRef.current.load();
   }, [audioBlob]);
 
@@ -197,6 +238,23 @@ export function AudioPreview({
   if (audioBlob) {
     return (
       <div className="space-y-2">
+      {/* Playback error — shown when the audio element cannot decode or play the file */}
+      {playbackError && (
+        <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50/60 px-4 py-3 dark:border-red-800/40 dark:bg-red-950/20">
+          <AlertCircle
+            className="mt-0.5 h-5 w-5 flex-shrink-0 text-red-500"
+            aria-hidden="true"
+          />
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-red-700 dark:text-red-300">
+              Playback error
+            </p>
+            <p className="mt-0.5 break-words text-xs text-red-600 dark:text-red-400">
+              {playbackError}
+            </p>
+          </div>
+        </div>
+      )}
       <div className="flex items-center gap-3 rounded-xl border border-green-200 bg-green-50/60 px-4 py-3 dark:border-green-800/40 dark:bg-green-950/20">
         {/* Play / Pause button — large tap target for mobile */}
         <button
@@ -241,12 +299,33 @@ export function AudioPreview({
       {fallbackUsed && actualProvider && (
         <div
           role="alert"
+          className="flex flex-col gap-1 rounded-xl border border-amber-300 bg-amber-50/70 px-4 py-2.5 dark:border-amber-700/50 dark:bg-amber-950/20"
+        >
+          <div className="flex items-start gap-2">
+            <span aria-hidden="true" className="mt-0.5 flex-shrink-0 text-amber-500">&#9888;</span>
+            <p className="text-xs text-amber-800 dark:text-amber-300">
+              Generated with <strong>{actualProvider}</strong>
+              {configuredProvider ? ` — ${configuredProvider} was unavailable` : ''}
+            </p>
+          </div>
+          {fallbackReason && (
+            <p className="ml-6 text-xs text-amber-700/80 dark:text-amber-400/70">
+              {formatFallbackReason(fallbackReason)}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* VoxWatch proxy fallback warning — shown when VoxWatch was unreachable and
+          local synthesis was used without the full dispatch audio pipeline. */}
+      {proxyFallback && (
+        <div
+          role="alert"
           className="flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50/70 px-4 py-2.5 dark:border-amber-700/50 dark:bg-amber-950/20"
         >
           <span aria-hidden="true" className="mt-0.5 flex-shrink-0 text-amber-500">&#9888;</span>
           <p className="text-xs text-amber-800 dark:text-amber-300">
-            Generated with <strong>{actualProvider}</strong>
-            {configuredProvider ? ` — ${configuredProvider} was unavailable` : ''}
+            VoxWatch service unreachable — preview is simplified (no dispatch effects)
           </p>
         </div>
       )}

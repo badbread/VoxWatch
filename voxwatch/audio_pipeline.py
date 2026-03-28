@@ -46,11 +46,12 @@ import os
 import threading
 import time
 import unicodedata
+from typing import Any
 
 import aiohttp
 
-from voxwatch.tts.factory import generate_with_fallback, get_provider
 from voxwatch.modes.mode import VoiceConfig
+from voxwatch.tts.factory import generate_with_fallback, get_provider
 
 logger = logging.getLogger("voxwatch.audio")
 
@@ -137,6 +138,9 @@ class AudioPipeline:
         self._stage1_duration: float = 0.0
         # Primary TTS provider — instantiated and warmed up in initialize()
         self._tts_provider = None
+        # Populated after each generate_tts call with the reason the primary
+        # provider failed and a fallback was used.  Empty when no fallback.
+        self._last_fallback_reason: str = ""
         # Pre-generated attention tone paths keyed by tone name.
         # Populated at startup by _generate_attention_tones().
         self._attention_tone_paths: dict[str, str] = {}
@@ -150,6 +154,14 @@ class AudioPipeline:
         # Backchannel stays active for ~30s after last push, so we re-warmup
         # if more than 25s have passed since the last successful push.
         self._warmup_ttl: float = 25.0
+        # Optional MQTT publisher — set by VoxWatchService after construction
+        # so pipeline failures can be reported to Home Assistant.
+        self._error_publisher: Any = None
+        # Last known go2rtc sender count per camera stream (for status reporting).
+        self._sender_counts: dict[str, int] = {}
+        # Current TTS provider status (for dashboard status reporting).
+        self._tts_provider_status: str = "unknown"
+        self._tts_provider_error: str = ""
 
     async def initialize(self) -> None:
         """Start the HTTP server, warm up the TTS provider, and cache Stage 1 audio.
@@ -180,12 +192,16 @@ class AudioPipeline:
                 "TTS provider '%s' warmed up successfully",
                 self.config.get("tts", {}).get("provider", "piper"),
             )
+            self._tts_provider_status = "ok"
+            self._tts_provider_error = ""
         except Exception as exc:
             logger.warning(
                 "TTS provider warmup failed (%s) — will rely on fallback_chain at generation time",
                 exc,
             )
             self._tts_provider = None
+            self._tts_provider_status = "error"
+            self._tts_provider_error = str(exc)
 
         # Pre-generate and cache the Stage 1 warning audio
         stage1_message = self.config["messages"]["stage1"]
@@ -238,6 +254,25 @@ class AudioPipeline:
         except OSError as e:
             logger.error("Failed to start HTTP server on port %d: %s", self._serve_port, e)
 
+    def set_error_publisher(self, publisher: Any) -> None:
+        """Attach an MQTT error publisher for surfacing pipeline failures."""
+        self._error_publisher = publisher
+
+    def _publish_pipeline_error(
+        self, error_type: str, error_message: str, camera: str = "", stage: int = 0
+    ) -> None:
+        """Publish a pipeline error to MQTT if a publisher is attached."""
+        if self._error_publisher and hasattr(self._error_publisher, "publish_error"):
+            try:
+                self._error_publisher.publish_error(
+                    error_type=error_type,
+                    error_message=error_message,
+                    camera=camera,
+                    stage=stage,
+                )
+            except Exception:
+                pass  # Never let error reporting break the pipeline
+
     async def generate_tts(self, message: str, output_path: str) -> bool:
         """Generate speech audio from text using the configured TTS provider chain.
 
@@ -265,10 +300,16 @@ class AudioPipeline:
         # Sanitize first so all downstream providers receive clean text.
         message = _sanitize_tts_input(message)
 
-        success = await generate_with_fallback(message, output_path, self.config)
-        if not success:
+        self._last_fallback_reason = ""
+        result = await generate_with_fallback(message, output_path, self.config)
+        if not result:
             logger.error("All TTS providers in fallback_chain exhausted — no audio generated")
-        return success
+            self._publish_pipeline_error("tts_failed", "All TTS providers exhausted — no audio generated")
+            return False
+        # Capture fallback info for preview API to surface to the user.
+        if result.fallback_reason:
+            self._last_fallback_reason = result.fallback_reason
+        return True
 
     async def generate_tts_with_voice(
         self,
@@ -309,10 +350,15 @@ class AudioPipeline:
             if voice_config.piper_model:
                 tts["piper_model"] = voice_config.piper_model
 
-        success = await generate_with_fallback(message, output_path, cfg)
-        if not success:
+        self._last_fallback_reason = ""
+        result = await generate_with_fallback(message, output_path, cfg)
+        if not result:
             logger.error("All TTS providers in fallback_chain exhausted — no audio generated")
-        return success
+            self._publish_pipeline_error("tts_failed", "All TTS providers exhausted — no audio generated")
+            return False
+        if result.fallback_reason:
+            self._last_fallback_reason = result.fallback_reason
+        return True
 
     async def convert_audio(self, input_path: str, output_path: str) -> bool:
         """Convert audio to camera-compatible format via ffmpeg.
@@ -358,12 +404,15 @@ class AudioPipeline:
                 return True
             logger.error("ffmpeg conversion failed (exit %d): %s", proc.returncode,
                          stderr.decode("utf-8", errors="replace")[-300:])
+            self._publish_pipeline_error("audio_conversion_failed", f"ffmpeg exit {proc.returncode}")
             return False
         except TimeoutError:
             logger.error("ffmpeg conversion timed out after %ds", SUBPROCESS_TIMEOUT)
+            self._publish_pipeline_error("audio_conversion_failed", "ffmpeg timed out")
             return False
         except FileNotFoundError:
             logger.error("ffmpeg not found — install ffmpeg")
+            self._publish_pipeline_error("audio_conversion_failed", "ffmpeg binary not found")
             return False
 
     async def get_audio_duration(self, file_path: str) -> float:
@@ -543,14 +592,39 @@ class AudioPipeline:
                                     retry_resp.status,
                                 )
                                 return False
-                        logger.error("go2rtc rejected audio push (HTTP %d): %s",
-                                     resp.status, body[:200])
-                        return False
+                        logger.warning(
+                            "go2rtc rejected audio push (HTTP %d): %s — retrying once in 2s",
+                            resp.status, body[:200],
+                        )
+                        await asyncio.sleep(2.0)
+                        async with session.post(
+                            api_url,
+                            timeout=aiohttp.ClientTimeout(total=total_timeout),
+                        ) as retry_resp:
+                            if retry_resp.status == 200:
+                                wait_time = duration + 2.0
+                                await asyncio.sleep(wait_time)
+                                self._warmed_up[camera_stream] = time.monotonic()
+                                logger.info("go2rtc retry succeeded on %s", camera_stream)
+                                return True
+                            logger.error("go2rtc retry also failed (HTTP %d)", retry_resp.status)
+                            self._publish_pipeline_error(
+                                "audio_push_failed",
+                                f"go2rtc HTTP {retry_resp.status} (after retry)",
+                                camera=camera_stream,
+                            )
+                            return False
         except TimeoutError:
             logger.error("go2rtc audio push timed out after %.0fs", total_timeout)
+            self._publish_pipeline_error(
+                "audio_push_failed",
+                f"go2rtc push timed out after {total_timeout:.0f}s",
+                camera=camera_stream,
+            )
             return False
         except Exception as e:
             logger.error("Audio push failed: %s", e)
+            self._publish_pipeline_error("audio_push_failed", str(e), camera=camera_stream)
             return False
 
     async def _check_sender_count(self, camera_stream: str, base_url: str) -> None:
@@ -578,12 +652,18 @@ class AudioPipeline:
                     for producer in data.get("producers", []):
                         senders = producer.get("senders", [])
                         count = len(senders)
+                        self._sender_counts[camera_stream] = count
                         if count >= 50:
                             logger.warning(
                                 "Stream '%s' has %d stale backchannel senders. "
                                 "Consider scheduling a Frigate restart during a "
                                 "maintenance window to clear them.",
                                 camera_stream, count,
+                            )
+                            self._publish_pipeline_error(
+                                "go2rtc_sender_leak",
+                                f"Stream '{camera_stream}' has {count} stale senders — restart recommended",
+                                camera=camera_stream,
                             )
                         elif count >= 20:
                             logger.info(

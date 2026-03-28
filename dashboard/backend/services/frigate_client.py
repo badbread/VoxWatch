@@ -22,7 +22,7 @@ Usage:
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import aiohttp
 
@@ -50,7 +50,7 @@ class FrigateClient:
             port: Frigate API port (default 5000).
         """
         self._base_url = f"http://{host}:{port}"
-        self._session: Optional[aiohttp.ClientSession] = None
+        self._session: aiohttp.ClientSession | None = None
 
     # ── Session lifecycle ─────────────────────────────────────────────────────
 
@@ -81,7 +81,7 @@ class FrigateClient:
 
     # ── API methods ───────────────────────────────────────────────────────────
 
-    async def get_version(self) -> Optional[str]:
+    async def get_version(self) -> str | None:
         """Fetch the Frigate version string.
 
         Returns:
@@ -96,7 +96,7 @@ class FrigateClient:
             logger.debug("Frigate get_version failed: %s", exc)
         return None
 
-    async def get_stats(self) -> Optional[Dict[str, Any]]:
+    async def get_stats(self) -> dict[str, Any] | None:
         """Fetch Frigate system stats.
 
         Returns:
@@ -112,7 +112,7 @@ class FrigateClient:
             logger.debug("Frigate get_stats failed: %s", exc)
         return None
 
-    async def get_cameras(self) -> Optional[List[str]]:
+    async def get_cameras(self) -> list[str] | None:
         """Get the list of camera names Frigate knows about.
 
         Returns:
@@ -130,7 +130,7 @@ class FrigateClient:
             logger.debug("Frigate get_cameras failed: %s", exc)
         return None
 
-    async def get_snapshot(self, camera_name: str) -> Optional[bytes]:
+    async def get_snapshot(self, camera_name: str) -> bytes | None:
         """Fetch the latest snapshot image for a camera.
 
         Proxies the raw JPEG bytes so the dashboard can stream them to the
@@ -159,7 +159,7 @@ class FrigateClient:
             )
         return None
 
-    async def get_camera_config(self, camera_name: str) -> Optional[Dict[str, Any]]:
+    async def get_camera_config(self, camera_name: str) -> dict[str, Any] | None:
         """Fetch Frigate's configuration block for a single camera.
 
         Args:
@@ -196,7 +196,7 @@ class FrigateClient:
         stats = await self.get_stats()
         cameras = await self.get_cameras()
 
-        uptime: Optional[int] = None
+        uptime: int | None = None
         if stats:
             uptime = stats.get("service", {}).get("uptime")
 
@@ -211,4 +211,4 @@ class FrigateClient:
 # ── Module-level singleton ────────────────────────────────────────────────────
 # Reconfigured in main.py after config is loaded.
 
-frigate_client: Optional[FrigateClient] = None
+frigate_client: FrigateClient | None = None

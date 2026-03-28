@@ -22,7 +22,7 @@ Usage:
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import aiohttp
 
@@ -50,7 +50,7 @@ class Go2rtcClient:
             api_port: go2rtc HTTP API port (default 1984).
         """
         self._base_url = f"http://{host}:{api_port}"
-        self._session: Optional[aiohttp.ClientSession] = None
+        self._session: aiohttp.ClientSession | None = None
 
     # ── Session lifecycle ─────────────────────────────────────────────────────
 
@@ -77,7 +77,7 @@ class Go2rtcClient:
 
     # ── API methods ───────────────────────────────────────────────────────────
 
-    async def get_streams(self) -> Optional[Dict[str, Any]]:
+    async def get_streams(self) -> dict[str, Any] | None:
         """Fetch the list of all configured streams from go2rtc.
 
         Returns:
@@ -93,7 +93,7 @@ class Go2rtcClient:
             logger.debug("go2rtc get_streams failed: %s", exc)
         return None
 
-    async def get_stream(self, stream_name: str) -> Optional[Dict[str, Any]]:
+    async def get_stream(self, stream_name: str) -> dict[str, Any] | None:
         """Fetch details for a specific stream.
 
         Args:
@@ -112,7 +112,7 @@ class Go2rtcClient:
             logger.debug("go2rtc get_stream(%s) failed: %s", stream_name, exc)
         return None
 
-    async def get_backchannel_info(self) -> Dict[str, Dict[str, Any]]:
+    async def get_backchannel_info(self) -> dict[str, dict[str, Any]]:
         """Check which streams have backchannel (two-way audio) support.
 
         Inspects each stream's producer medias for 'sendonly' tracks, which
@@ -125,13 +125,13 @@ class Go2rtcClient:
                 "driveway": {"has_backchannel": False, "codecs": []},
             }
         """
-        result: Dict[str, Dict[str, Any]] = {}
+        result: dict[str, dict[str, Any]] = {}
         streams = await self.get_streams()
         if not streams:
             return result
 
         for name, info in streams.items():
-            codecs: List[str] = []
+            codecs: list[str] = []
             producers = info.get("producers", [])
             if isinstance(producers, list):
                 for p in producers:
@@ -152,7 +152,7 @@ class Go2rtcClient:
 
         return result
 
-    async def get_version(self) -> Optional[str]:
+    async def get_version(self) -> str | None:
         """Fetch the go2rtc version string.
 
         go2rtc doesn't expose a dedicated /version endpoint, but its root
@@ -247,4 +247,4 @@ class Go2rtcClient:
 # ── Module-level singleton ────────────────────────────────────────────────────
 # Reconfigured in main.py after config is loaded.
 
-go2rtc_client: Optional[Go2rtcClient] = None
+go2rtc_client: Go2rtcClient | None = None

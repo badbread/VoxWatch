@@ -51,11 +51,15 @@ class TTSResult:
         provider_name: Human-readable name of the provider that produced
             this result (e.g., "piper", "elevenlabs").  Useful for logging
             and telemetry.
+        fallback_reason: If the result came from a fallback provider, this
+            contains a human-readable reason why the primary failed (e.g.
+            "HTTP 429: quota exceeded").  Empty string when no fallback occurred.
     """
 
     path: str
     duration_seconds: float
     provider_name: str
+    fallback_reason: str = ""
 
 
 class TTSProviderError(Exception):

@@ -40,9 +40,9 @@ from __future__ import annotations
 import json
 import logging
 import time
-from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Optional
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
+from typing import Any
 
 import paho.mqtt.client as mqtt
 
@@ -78,8 +78,8 @@ class StageEvent:
     total_stages: int = 3
     mode: str = ""
     audio_pushed: bool = False
-    ai_analysis: Optional[dict] = None
-    message_text: Optional[str] = None
+    ai_analysis: dict | None = None
+    message_text: str | None = None
     person_still_present: bool = True
     frigate_event_id: str = ""
 
@@ -119,7 +119,7 @@ class ErrorEvent:
 
 def _now_iso() -> str:
     """Return the current UTC time as an ISO 8601 string."""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
 def _make_vw_event_id(camera: str) -> str:
@@ -214,8 +214,8 @@ class VoxWatchPublisher:
         stage: int,
         mode: str,
         audio_pushed: bool = False,
-        ai_analysis: Optional[dict] = None,
-        message_text: Optional[str] = None,
+        ai_analysis: dict | None = None,
+        message_text: str | None = None,
         person_still_present: bool = True,
         frigate_event_id: str = "",
         total_stages: int = 3,
