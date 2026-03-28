@@ -1206,7 +1206,7 @@ class AudioPipeline:
         # Step 2.5: Apply radio static effect for police_dispatch persona.
         # Band-pass + noise overlay simulates a police scanner broadcast.
         cfg = self.config or {}
-        persona = cfg.get("persona", {}).get("name", "standard")
+        persona = (cfg.get("persona") or {}).get("name", "standard")
         if persona == "police_dispatch":
             await self._apply_radio_effect(output_path)
 
