@@ -494,7 +494,7 @@ async def _resolve_tts_key(cfg: dict, cfg_key: str, config_path: str) -> str:
 
         # Fallback: scan the TTS section for any api_key field
         tts_cfg = raw_cfg.get("tts", {})
-        for section_name, section in tts_cfg.items():
+        for _section_name, section in tts_cfg.items():
             if isinstance(section, dict) and "api_key" in section:
                 raw_key = section["api_key"]
                 if isinstance(raw_key, str) and raw_key:
@@ -619,7 +619,7 @@ class LogsResponse(BaseModel):
 
 # Standard Python logging format pattern used by VoxWatch:
 # 2025-03-24 02:15:33,123 - voxwatch.audio - INFO - Message here
-import re as _re
+import re as _re  # noqa: E402 — placed near usage for readability
 
 # Match both VoxWatch log formats:
 # Format 1 (console): 2026-03-24 20:58:37 [voxwatch.service] INFO: Message

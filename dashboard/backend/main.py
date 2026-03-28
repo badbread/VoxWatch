@@ -54,7 +54,7 @@ from backend.routers import (
     cameras,
     config_editor,
     setup,
-    status,
+    status,  # noqa: F811 — shadows fastapi.status, intentional
     system,
     wizard,
 )

@@ -44,6 +44,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
 from backend import config as dashboard_cfg
+from backend.services import go2rtc_client as g2rtc_module
 
 logger = logging.getLogger("dashboard.router.setup")
 

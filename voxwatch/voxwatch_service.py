@@ -33,15 +33,11 @@ Signal handling:
       - In-flight pipeline tasks are awaited briefly before cancellation
 """
 
-import argparse
 import asyncio
 import contextlib
 import json
 import logging
-import logging.handlers
 import os
-import signal
-import sys
 import time
 from datetime import UTC, datetime
 from typing import Any
@@ -69,7 +65,7 @@ from voxwatch.conditions import (
     check_cooldown,
     is_active_hours,
 )
-from voxwatch.config import load_config_or_none, reload_config
+from voxwatch.config import reload_config
 from voxwatch.modes import (
     build_ai_vars,
     get_mode_template,
@@ -1419,6 +1415,7 @@ class VoxWatchService:
         logger.info("Initial Response [dispatch]: '%s'", canned)
         return await self._audio.generate_and_push(camera_stream, canned, "stage2")
 
+
     async def _play_dispatch_escalation(
         self,
         camera_stream: str,
@@ -1426,15 +1423,10 @@ class VoxWatchService:
     ) -> bool:
         """Play segmented dispatch audio for the Escalation stage.
 
-        Wraps the existing ``_play_dispatch_stage2`` and ``_play_dispatch_stage3``
-        logic into a single unified method.  The AI output is treated as a Stage 3
-        behavioral update if it contains movement/behavior JSON; otherwise it is
-        handled as a Stage 2 appearance description.
-
-        For simplicity, this always routes through the Stage 3 (behavioral)
-        dispatch path during escalation because by the time escalation fires,
-        the person has been present for several seconds and behavioral context
-        is more useful than appearance alone.
+        Delegates to ``_play_dispatch_stage`` using the ``"stage3"`` label.
+        At escalation time the person has been present for several seconds, so
+        the Stage 3 behavioral schema (behavior + movement) is more useful than
+        the initial appearance description.
 
         Fallback: if ``ai_output`` is None, uses a canned escalation alert.
 
@@ -1445,42 +1437,18 @@ class VoxWatchService:
         Returns:
             True if audio was pushed successfully, False otherwise.
         """
-        if not ai_output:
-            fallback = (
-                "Dispatch update. Suspect remains on scene. "
-                "Advise... immediate departure."
-            )
-            logger.warning("Escalation dispatch: no AI output — using canned escalation.")
-            return await self._audio.generate_and_push(camera_stream, fallback, "stage3")
-
-        # Try Stage 3 (behavior) schema first; if the JSON parses as Stage 2
-        # (suspect_count, description, location) it will fall through gracefully.
-        segments = segment_dispatch_message(ai_output, stage="stage3", config=self.config)
-        logger.info(
-            "Escalation dispatch: %d segment(s) from AI output.", len(segments)
+        fallback = (
+            "Dispatch update. Suspect remains on scene. "
+            "Advise... immediate departure."
         )
-
-        output_path = os.path.join(self._audio._serve_dir, "escalation_dispatch_ready.wav")
-        composed = await compose_dispatch_audio(
-            segments=segments,
-            output_path=output_path,
-            audio_pipeline=self._audio,
-            config=self.config,
-            stage_label="escalation",
+        _, push_ok, _ = await self._play_dispatch_stage(
+            stage_label="stage3",
+            ai_output=ai_output,
+            camera_stream=camera_stream,
+            camera_name="",
+            fallback_text=fallback,
         )
-
-        if composed and os.path.exists(composed):
-            ok = await self._audio.push_audio(camera_stream, composed)
-            with contextlib.suppress(OSError):
-                os.remove(composed)
-            return ok
-
-        logger.warning("Escalation dispatch: composition failed — falling back to plain TTS.")
-        return await self._audio.generate_and_push(
-            camera_stream,
-            " ".join(segments) if segments else "Dispatch update. Suspect remains on scene.",
-            "stage3",
-        )
+        return push_ok
 
     async def _play_resolution(
         self,
@@ -1888,140 +1856,86 @@ class VoxWatchService:
 
     # ── Dispatch persona audio helpers ────────────────────────────────────────
 
-    async def _play_dispatch_stage2(
+    async def _play_dispatch_stage(
         self,
-        camera_stream: str,
+        stage_label: str,
         ai_output: str | None,
-    ) -> bool:
-        """Generate and push segmented dispatch audio for Stage 2.
+        camera_stream: str,
+        camera_name: str,
+        fallback_text: str,
+    ) -> tuple[str | None, bool, str | None]:
+        """Generate and push segmented dispatch audio for a given stage.
 
-        Called instead of the standard ``generate_and_push`` flow when a
-        dispatch-style persona is active.  Segments the AI's structured JSON
-        output into scanner-style speech chunks, composes them with radio
-        static effects, and pushes the result.
+        Shared implementation for all dispatch pipeline stages.  Segments the
+        AI's structured JSON output into scanner-style speech chunks, composes
+        them with radio static effects, and pushes the result to the camera
+        speaker.
 
         Fallback behaviour:
-          - If ``ai_output`` is None or empty, a canned dispatch alert is used
-            so the deterrent always plays something.
+          - If ``ai_output`` is None or empty, ``fallback_text`` is used so the
+            deterrent always plays something.
           - If ``compose_dispatch_audio`` fails entirely (returns None), the
             method falls back to plain ``generate_and_push`` with the raw
-            ai_output text so the pipeline never goes silent.
+            segment text so the pipeline never goes silent.
 
         Args:
-            camera_stream: go2rtc stream name for the target camera.
+            stage_label: Stage identifier for logging and audio routing — one
+                of ``"stage2"``, ``"stage3"``, ``"escalation"``, etc.
             ai_output: Raw AI response string (expected to be JSON for dispatch
                 personas).  May be None if the AI call failed.
+            camera_stream: go2rtc stream name for the target camera.
+            camera_name: Frigate camera name (used for file naming).
+            fallback_text: Canned text to speak when ``ai_output`` is absent.
 
         Returns:
-            True if audio was successfully pushed, False otherwise.
+            A 3-tuple of ``(ai_output, push_success, spoken_text)``.
+            ``ai_output`` is passed through unchanged (callers use it for the
+            event log).  ``push_success`` is True if the audio push succeeded.
+            ``spoken_text`` is the exact text or segment join that was rendered.
         """
-        fallback_text = (
-            "All units... 10-97. Unidentified subject on scene. "
-            "Nearest unit, respond... code three."
-        )
-
         if not ai_output:
             logger.warning(
-                "Stage 2 dispatch: no AI output — using canned dispatch alert."
+                "%s dispatch: no AI output — using canned alert.", stage_label
             )
-            return await self._audio.generate_and_push(
-                camera_stream, fallback_text, "stage2"
+            ok = await self._audio.generate_and_push(
+                camera_stream, fallback_text, stage_label
             )
+            return None, ok, fallback_text
 
-        segments = segment_dispatch_message(ai_output, stage="stage2", config=self.config)
+        segments = segment_dispatch_message(ai_output, stage=stage_label, config=self.config)
         logger.info(
-            "Stage 2 dispatch: %d segment(s) generated from AI output.", len(segments)
+            "%s dispatch: %d segment(s) generated from AI output.",
+            stage_label,
+            len(segments),
         )
 
-        output_path = os.path.join(self._audio._serve_dir, "stage2_dispatch_ready.wav")
+        safe_label = stage_label.replace("/", "_")
+        output_path = os.path.join(
+            self._audio._serve_dir, f"{safe_label}_dispatch_ready.wav"
+        )
         composed = await compose_dispatch_audio(
             segments=segments,
             output_path=output_path,
             audio_pipeline=self._audio,
             config=self.config,
-            stage_label="stage2",
+            stage_label=stage_label,
         )
 
         if composed and os.path.exists(composed):
-            logger.info("Stage 2 dispatch: pushing composed audio to %s...", camera_stream)
-            ok = await self._audio.push_audio(camera_stream, composed)
-            # Clean up the composed file after push
-            with contextlib.suppress(OSError):
-                os.remove(composed)
-            return ok
-
-        # Composition failed entirely — fall back to plain TTS with the raw text
-        logger.warning(
-            "Stage 2 dispatch: composition failed — falling back to plain TTS."
-        )
-        plain_text = " ".join(segments) if segments else fallback_text
-        return await self._audio.generate_and_push(
-            camera_stream, plain_text, "stage2"
-        )
-
-    async def _play_dispatch_stage3(
-        self,
-        camera_stream: str,
-        ai_output: str | None,
-    ) -> bool:
-        """Generate and push segmented dispatch audio for Stage 3.
-
-        Equivalent to ``_play_dispatch_stage2`` but uses the Stage 3 JSON
-        schema (behavior + movement) and assembles an escalation-update message
-        rather than an initial contact message.
-
-        Fallback behaviour mirrors ``_play_dispatch_stage2``: canned escalation
-        text if no AI output, plain TTS if composition fails.
-
-        Args:
-            camera_stream: go2rtc stream name for the target camera.
-            ai_output: Raw AI response string (expected to be JSON for dispatch
-                personas).  May be None if the AI call failed.
-
-        Returns:
-            True if audio was successfully pushed, False otherwise.
-        """
-        fallback_text = (
-            "Dispatch update. Suspect still on scene. "
-            "This is now a ten thirty-one, crime in progress. Requesting backup."
-        )
-
-        if not ai_output:
-            logger.warning(
-                "Stage 3 dispatch: no AI output — using canned escalation alert."
+            logger.info(
+                "%s dispatch: pushing composed audio to %s...", stage_label, camera_stream
             )
-            return await self._audio.generate_and_push(
-                camera_stream, fallback_text, "stage3"
-            )
-
-        segments = segment_dispatch_message(ai_output, stage="stage3", config=self.config)
-        logger.info(
-            "Stage 3 dispatch: %d segment(s) generated from AI output.", len(segments)
-        )
-
-        output_path = os.path.join(self._audio._serve_dir, "stage3_dispatch_ready.wav")
-        composed = await compose_dispatch_audio(
-            segments=segments,
-            output_path=output_path,
-            audio_pipeline=self._audio,
-            config=self.config,
-            stage_label="stage3",
-        )
-
-        if composed and os.path.exists(composed):
-            logger.info("Stage 3 dispatch: pushing composed audio to %s...", camera_stream)
             ok = await self._audio.push_audio(camera_stream, composed)
             with contextlib.suppress(OSError):
                 os.remove(composed)
-            return ok
+            return ai_output, ok, ai_output
 
         logger.warning(
-            "Stage 3 dispatch: composition failed — falling back to plain TTS."
+            "%s dispatch: composition failed — falling back to plain TTS.", stage_label
         )
         plain_text = " ".join(segments) if segments else fallback_text
-        return await self._audio.generate_and_push(
-            camera_stream, plain_text, "stage3"
-        )
+        ok = await self._audio.generate_and_push(camera_stream, plain_text, stage_label)
+        return ai_output, ok, plain_text
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -2094,7 +2008,22 @@ class VoxWatchService:
         ensure_camera_stats(self._camera_stats, camera_name)
 
 
-# ── Logging setup ─────────────────────────────────────────────────────────────
+# ── Entry point (backward-compat shim) ───────────────────────────────────────
+# CLI entry point, logging setup, and signal handling now live in
+# voxwatch/__main__.py so this module is purely the service class.
+# The shim below means ``python -m voxwatch.voxwatch_service`` continues to
+# work alongside the canonical ``python -m voxwatch``.
+
+def main() -> None:
+    """Backward-compatibility entry point — delegates to ``voxwatch.__main__``.
+
+    The canonical entry point is ``python -m voxwatch`` (or the ``voxwatch``
+    console-script defined in pyproject.toml).  This shim ensures that
+    ``python -m voxwatch.voxwatch_service`` also works so existing Docker
+    CMD instructions do not need to change.
+    """
+    from voxwatch.__main__ import main as _main
+    _main()
 
 
 def setup_logging(
@@ -2103,14 +2032,7 @@ def setup_logging(
     max_bytes: int = 10 * 1024 * 1024,
     backup_count: int = 5,
 ) -> None:
-    """Configure root and voxwatch loggers with console and rotating file output.
-
-    All voxwatch modules use ``logging.getLogger("voxwatch.*")`` so this
-    single configuration covers the whole service.
-
-    Rotation prevents unbounded disk growth — default is 10 MB per file
-    with 5 backups (50 MB total max).  These values are configurable in
-    config.yaml under ``logging.max_bytes`` and ``logging.backup_count``.
+    """Backward-compatibility shim — delegates to ``voxwatch.__main__.setup_logging``.
 
     Args:
         level_str: Log level string ("DEBUG", "INFO", "WARNING", "ERROR").
@@ -2118,176 +2040,8 @@ def setup_logging(
         max_bytes: Maximum size of each log file before rotation (default 10 MB).
         backup_count: Number of rotated backup files to keep (default 5).
     """
-    level = getattr(logging, level_str.upper(), logging.INFO)
-
-    # Consistent format used by all handlers — timestamp, logger name, level, message.
-    formatter = logging.Formatter(
-        fmt="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-
-    root_logger = logging.getLogger()
-    root_logger.setLevel(level)
-
-    # Clear any pre-existing handlers to prevent duplicate log lines
-    # (e.g. basicConfig auto-added a StreamHandler before we got here).
-    root_logger.handlers.clear()
-
-    # Console handler — always present so Docker logs work out of the box.
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(formatter)
-    root_logger.addHandler(console_handler)
-
-    # File handler — rotating to prevent unbounded disk growth.
-    if log_file:
-        try:
-            os.makedirs(os.path.dirname(log_file), exist_ok=True)
-            file_handler = logging.handlers.RotatingFileHandler(
-                log_file,
-                maxBytes=max_bytes,
-                backupCount=backup_count,
-            )
-            file_handler.setFormatter(formatter)
-            root_logger.addHandler(file_handler)
-            logger.info(
-                "Logging to file: %s (max %d MB, %d backups)",
-                log_file,
-                max_bytes // (1024 * 1024),
-                backup_count,
-            )
-        except OSError as exc:
-            logger.warning(
-                "Could not open log file %s: %s — logging to console only.",
-                log_file,
-                exc,
-            )
-
-
-# ── Entry point ───────────────────────────────────────────────────────────────
-
-
-def main() -> None:
-    """Entry point for the VoxWatch service.
-
-    Parses command-line arguments, configures logging, loads config, and
-    runs the async event loop.  Registers SIGTERM/SIGINT handlers for
-    graceful shutdown so Docker stop/restart works cleanly.
-
-    Example:
-        python -m voxwatch.voxwatch_service
-        python -m voxwatch.voxwatch_service --config /config/config.yaml
-    """
-    parser = argparse.ArgumentParser(
-        description="VoxWatch — AI-powered security audio deterrent system."
-    )
-    parser.add_argument(
-        "--config",
-        default="/config/config.yaml",
-        help="Path to config.yaml (default: /config/config.yaml)",
-    )
-    args = parser.parse_args()
-
-    # Bootstrap minimal logging before the config is loaded so any early
-    # errors are visible rather than silently swallowed.
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
-        stream=sys.stdout,
-    )
-
-    # Attempt to load config — if it doesn't exist yet, wait for the setup
-    # wizard to write it.  This lets the container start cleanly before
-    # config.yaml has been created via the first-run web wizard.
-    config = load_config_or_none(args.config)
-    if config is None:
-        logger.info(
-            "config.yaml not found at %s — waiting for setup. "
-            "Open the VoxWatch Dashboard at http://your-host:33344 to complete first-run setup.",
-            args.config,
-        )
-        while config is None:
-            time.sleep(5)
-            config = load_config_or_none(args.config)
-        logger.info("config.yaml detected — starting VoxWatch service.")
-
-    # Re-configure logging with values from the loaded config.
-    # Rotation settings prevent unbounded disk growth — configurable in config.yaml.
-    log_cfg = config.get("logging", {})
-    setup_logging(
-        level_str=log_cfg.get("level", "INFO"),
-        log_file=log_cfg.get("file"),
-        max_bytes=log_cfg.get("max_bytes", 10 * 1024 * 1024),
-        backup_count=log_cfg.get("backup_count", 5),
-    )
-
-    logger.info("Starting VoxWatch v%s", _get_version())
-    logger.info("Config: %s", args.config)
-
-    # Create the service instance.  Pass config_path so the hot-reload watcher
-    # knows which file to monitor for changes.
-    service = VoxWatchService(config, config_path=args.config)
-
-    # Get (or create) the event loop before registering signal handlers,
-    # because the handlers need a reference to the loop.
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
-    def _handle_signal(sig_name: str) -> None:
-        """Schedule graceful shutdown on the event loop when a signal arrives.
-
-        This function is called from the signal handler installed below.
-        We schedule ``service.stop()`` as a coroutine on the loop because
-        signal handlers must not block or call asyncio directly.
-
-        Args:
-            sig_name: Human-readable signal name for logging.
-        """
-        logger.info("Received %s — initiating graceful shutdown...", sig_name)
-        # create_task is safe here because this runs on the event loop thread
-        # (asyncio signal handlers are delivered on the loop thread).
-        loop.create_task(service.stop())
-
-    # Register POSIX signal handlers.  On Windows, only SIGINT (Ctrl-C) is
-    # reliably supported; SIGTERM is a no-op on win32 but harmless to register.
-    for sig, name in [(signal.SIGTERM, "SIGTERM"), (signal.SIGINT, "SIGINT")]:
-        try:
-            loop.add_signal_handler(sig, _handle_signal, name)
-        except (NotImplementedError, AttributeError):
-            # Windows does not support loop.add_signal_handler — fall back to
-            # the standard signal module which handles SIGINT (Ctrl-C) only.
-            signal.signal(sig, lambda s, f, n=name: _handle_signal(n))
-
-    try:
-        loop.run_until_complete(service.start())
-    except KeyboardInterrupt:
-        # Ctrl-C on platforms where the signal handler fallback isn't used.
-        logger.info("KeyboardInterrupt received — shutting down...")
-        loop.run_until_complete(service.stop())
-    finally:
-        # Cancel any remaining tasks and close the loop cleanly.
-        pending = asyncio.all_tasks(loop)
-        if pending:
-            logger.debug("Cancelling %d pending task(s)...", len(pending))
-            for task in pending:
-                task.cancel()
-            loop.run_until_complete(
-                asyncio.gather(*pending, return_exceptions=True)
-            )
-        loop.close()
-        logger.info("Event loop closed. Goodbye.")
-
-
-def _get_version() -> str:
-    """Return the VoxWatch package version string.
-
-    Returns:
-        Version string from ``voxwatch.__version__``, or "unknown" on failure.
-    """
-    try:
-        from voxwatch import __version__
-        return __version__
-    except ImportError:
-        return "unknown"
+    from voxwatch.__main__ import setup_logging as _setup_logging
+    _setup_logging(level_str, log_file, max_bytes, backup_count)
 
 
 if __name__ == "__main__":
