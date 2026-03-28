@@ -29,9 +29,12 @@ logger = logging.getLogger("voxwatch.ai_vision")
 STAGE2_PROMPT = (
     "You are a security camera speaker. Your output will be read aloud as a "
     "spoken deterrent. Respond with ONLY a single short sentence describing "
-    "the person's appearance. Example: \"Person wearing a red hoodie and dark "
-    "jeans near the front door.\" No labels, no bounding boxes, no preamble, "
-    "no explanation. Just one sentence, under 20 words."
+    "the person's appearance and what they are doing or carrying. "
+    "Example: \"Person in a red hoodie carrying a backpack, trying the front door.\" "
+    "Include any objects they are holding (bags, tools, weapons) and notable actions "
+    "(looking in windows, testing door handles, crouching). "
+    "No labels, no bounding boxes, no preamble, no explanation. "
+    "Just one sentence, under 25 words."
 )
 
 #: Stage 3 prompt — asks the AI to describe what the person is *doing* so
@@ -77,12 +80,14 @@ DISPATCH_STAGE2_PROMPT: str = (
     "Required JSON schema:\n"
     "{\n"
     '  "suspect_count": "one" | "two" | "multiple",\n'
-    '  "description": "sex, age-range, clothing top-to-bottom, build",\n'
+    '  "description": "sex, age-range, clothing, build, and any carried items or notable actions",\n'
     '  "location": "where they are relative to the property"\n'
     "}\n\n"
     "Rules:\n"
     "- description: comma-separated fragments, no full sentences. "
-    "Example: \"male, dark hoodie, gray pants, medium build\"\n"
+    "Include anything the person is carrying (bags, tools, weapons) "
+    "and any notable actions (looking in windows, trying doors, crouching). "
+    "Example: \"male, dark hoodie, gray pants, medium build, carrying backpack, looking in windows\"\n"
     "- location: one short clause. "
     "Example: \"approaching front door from driveway\"\n"
     "- If night vision (grayscale/green): skip colors, describe silhouette "

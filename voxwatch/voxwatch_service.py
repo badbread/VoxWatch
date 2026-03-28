@@ -50,7 +50,6 @@ from voxwatch.ai_vision import (
     analyze_snapshots,
     analyze_video,
     check_person_still_present,
-    get_dispatch_initial_message,
     get_last_ai_error,
     get_stage2_prompt,
     get_stage3_prompt,
@@ -1096,38 +1095,40 @@ class VoxWatchService:
             the audio push succeeded, False otherwise.  ``initial_text`` is the
             rendered TTS string that was (or would have been) spoken.
         """
-        from voxwatch.radio_dispatch import DISPATCH_MODES  # noqa: PLC0415
-
-        if mode_name in DISPATCH_MODES:
-            # For dispatch modes: build an address/agency-aware canned message
-            # rather than the plain static default.  The full segmented radio
-            # treatment (with AI-driven suspect description) fires in Escalation.
-            initial_text = get_dispatch_initial_message(self.config)
-        else:
-            # Try the new mode system first: get the stage1 template.
-            # The camera_name is embedded in mode_name already (resolved above),
-            # so look up the mode object and pull its stage1 template.
-            try:
-                mode_obj = get_active_mode_obj(self.config)
-                if mode_obj.id == mode_name:
-                    # Build minimal ai_vars — no AI result available yet at stage1.
-                    _vars = build_ai_vars(self.config, camera_name="")
-                    initial_text = get_mode_template(mode_obj, "stage1", _vars, index=0)
-                else:
-                    raise LookupError("mode_name mismatch")
-            except Exception:
-                # Graceful fallback to the old DEFAULT_MESSAGES dict.
-                mode_defaults = DEFAULT_MESSAGES.get(mode_name, DEFAULT_MESSAGES["standard"])
-                initial_text = mode_defaults.get(
-                    "initial",
-                    DEFAULT_MESSAGES["standard"]["initial"],
-                )
+        # All modes (including dispatch) use the mode's stage1 template for the
+        # initial response.  For dispatch modes, stage1 is a direct warning
+        # ("You have been spotted, the homeowner has been alerted") using the
+        # global TTS voice.  The full dispatch radio treatment (10-codes, officer
+        # response, radio effects) only fires in the Escalation stage.
+        try:
+            mode_obj = get_active_mode_obj(self.config)
+            if mode_obj.id == mode_name:
+                # Build minimal ai_vars — no AI result available yet at stage1.
+                _vars = build_ai_vars(self.config, camera_name="")
+                initial_text = get_mode_template(mode_obj, "stage1", _vars, index=0)
+            else:
+                raise LookupError("mode_name mismatch")
+        except Exception:
+            # Graceful fallback to the old DEFAULT_MESSAGES dict.
+            mode_defaults = DEFAULT_MESSAGES.get(mode_name, DEFAULT_MESSAGES["standard"])
+            initial_text = mode_defaults.get(
+                "initial",
+                DEFAULT_MESSAGES["standard"]["initial"],
+            )
 
         logger.info(
             "Initial Response [%s]: '%s'", mode_name, initial_text
         )
+
+        # For dispatch modes, Stage 1 uses the global TTS voice (not the
+        # dispatcher voice) since it's a direct warning to the intruder,
+        # not a radio dispatch call.  The dispatcher voice only fires in
+        # the Escalation stage.
+        from voxwatch.radio_dispatch import DISPATCH_MODES  # noqa: PLC0415
+        stage1_voice = None if mode_name in DISPATCH_MODES else voice_config
+
         push_ok = await self._audio.generate_and_push(
-            camera_stream, initial_text, "stage2", voice_config
+            camera_stream, initial_text, "stage1", stage1_voice
         )
         return push_ok, initial_text
 
@@ -1426,10 +1427,10 @@ class VoxWatchService:
     ) -> bool:
         """Play segmented dispatch audio for the Escalation stage.
 
-        Delegates to ``_play_dispatch_stage`` using the ``"stage3"`` label.
-        At escalation time the person has been present for several seconds, so
-        the Stage 3 behavioral schema (behavior + movement) is more useful than
-        the initial appearance description.
+        Uses ``stage="stage2"`` because the AI description is always in
+        Stage 2 format (suspect_count, description, location) — the
+        appearance-based schema.  This produces the full dispatch call:
+        "All units, 10-97 at address. Suspect described as..."
 
         Fallback: if ``ai_output`` is None, uses a canned escalation alert.
 
@@ -1445,7 +1446,7 @@ class VoxWatchService:
             "Advise... immediate departure."
         )
         _, push_ok, _ = await self._play_dispatch_stage(
-            stage_label="stage3",
+            stage_label="stage2",
             ai_output=ai_output,
             camera_stream=camera_stream,
             camera_name="",

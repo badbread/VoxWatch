@@ -94,7 +94,7 @@ async def _call_gemini_images(
             {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
         ],
         "generationConfig": {
-            "maxOutputTokens": 300,
+            "maxOutputTokens": 500,
             "temperature": 0.3,
         },
     }
@@ -143,6 +143,14 @@ async def _call_gemini_images(
     candidates = data.get("candidates", [])
     if not candidates:
         raise ValueError("Gemini returned no candidates in response")
+
+    # Check finish reason — if MAX_TOKENS, the output was truncated.
+    finish_reason = candidates[0].get("finishReason", "")
+    if finish_reason == "MAX_TOKENS":
+        logger.warning(
+            "Gemini response truncated (finishReason=MAX_TOKENS) — "
+            "increase maxOutputTokens if this happens frequently"
+        )
 
     response_parts = candidates[0].get("content", {}).get("parts", [])
     text = " ".join(p.get("text", "") for p in response_parts).strip()
@@ -306,7 +314,7 @@ async def _call_gemini_video(
             {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
         ],
         "generationConfig": {
-            "maxOutputTokens": 300,
+            "maxOutputTokens": 500,
             "temperature": 0.3,
         },
     }

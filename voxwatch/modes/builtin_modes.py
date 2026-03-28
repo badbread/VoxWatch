@@ -117,15 +117,11 @@ BUILTIN_MODES: list[ResponseMode] = [
         voice=VoiceConfig(kokoro_voice="af_bella", openai_voice="nova", elevenlabs_voice="46zEzba8Y8yQ0bVcv5O9"),
         stages={
             "stage1": _stage(
-                prompt_modifier=(
-                    "You are a female police dispatcher on a radio channel. "
-                    "Speak in police radio dispatch language — 10-codes, calm "
-                    "professional tone, concise and factual."
-                ),
+                prompt_modifier="",
                 templates=[
-                    "All units... be advised. Subject detected at {address_street}.",
-                    "{camera_name} dispatch... 10-97 at {address_street}. Subject detected.",
-                    "All units... 10-97. Unauthorized subject on premises.",
+                    "Attention. You have been spotted on camera. The homeowner has been alerted.",
+                    "You are being recorded. The homeowner has been notified. Leave the property now.",
+                    "Attention. You are on private property and you have been detected on camera. The homeowner is aware.",
                 ],
             ),
             "stage2": _stage(

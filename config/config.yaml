@@ -36,7 +36,7 @@ cameras:
 # Detection conditions — all must be true to trigger the deterrent
 conditions:
   min_score: 0.7               # Minimum Frigate detection confidence (0.0-1.0)
-  cooldown_seconds: 60         # Per-camera cooldown between triggers
+  cooldown_seconds: 180        # Per-camera cooldown between triggers (3 minutes)
   active_hours:
     mode: "always"             # "always" (24/7), "sunset_sunrise", or "fixed"
     # Fixed hours (only used if mode is "fixed")

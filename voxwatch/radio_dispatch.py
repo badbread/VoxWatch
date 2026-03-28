@@ -102,6 +102,13 @@ _MAX_SEGMENTS: int = 6
 # Timeout (seconds) for each ffmpeg segment-concatenation subprocess.
 _CONCAT_TIMEOUT_SECONDS: int = 20
 
+# Priority alert tone parameters — three ascending beeps heard before
+# urgent dispatch calls.  Similar to real MDC-1200 priority tones.
+_ALERT_TONE_FREQS: list[int] = [1000, 1200, 1400]  # Hz, ascending
+_ALERT_TONE_BEEP_DURATION: float = 0.15  # seconds per beep
+_ALERT_TONE_GAP_DURATION: float = 0.08  # seconds between beeps
+_ALERT_TONE_TAIL_PAUSE: float = 0.3  # silence after the last beep
+
 # Timeout (seconds) for the silence-generation ffmpeg call.
 _SILENCE_GEN_TIMEOUT_SECONDS: int = 10
 
@@ -123,16 +130,16 @@ _OFFICER_DEFAULT_VOICE: str = "am_fenrir"
 #: sounds like the close of a routine police transmission.  A random entry is
 #: chosen on each event so the intro never repeats identically.
 RANDOM_CHATTER: list[str] = [
-    "...ten four, all clear... Oak Avenue. Resuming patrol.",
-    "...copy that. No further action needed. Ten eight.",
-    "...subject has left the area. Show us clear.",
-    "...negative on that vehicle. Plates don't match. Disregard.",
-    "...ten four, wrapping up on scene. Back in service.",
-    "...all units, previous call... Fifth Street is code four. Resume normal.",
-    "...roger. Suspect not located. Area canvas complete.",
-    "...ten four. Alarm company confirms... false alarm. Resuming patrol.",
-    "...show me ten eight. Heading back to district.",
-    "...copy. Welfare check complete. All occupants accounted for.",
+    "clear on Oak Avenue. Resuming patrol.",
+    "ther action needed. Ten eight.",
+    "eft the area. Show us clear.",
+    "ative on that vehicle. Plates don't match. Disregard.",
+    "ene. Back in service. Ten eight.",
+    "eet is code four. Resume normal.",
+    "pect not located. Area canvas complete.",
+    "firms false alarm. Resuming patrol.",
+    "ading back to district. Show me ten eight.",
+    "omplete. All occupants accounted for.",
 ]
 
 # ---------------------------------------------------------------------------
@@ -442,16 +449,10 @@ def _build_stage2_segments(
         seg1_header = "All units... 10-97."
     segments.append(f"{seg1_header} Reporting {suspect_count} subject on scene.")
 
-    # Segment 2: Suspect description — add pauses between details.
-    # Real dispatchers pause between each descriptor: "male... dark hoodie...
-    # medium build."  Split on commas and rejoin with periods for hard pauses.
-    desc_parts = [p.strip() for p in description.split(",") if p.strip()]
-    if len(desc_parts) > 1:
-        # Join with ". " to create hard pauses between each detail
-        spaced_desc = ". ".join(desc_parts)
-        segments.append(f"Suspect described as... {spaced_desc}.")
-    else:
-        segments.append(f"Suspect described as... {description}.")
+    # Segment 2: Suspect description — natural dispatcher cadence.
+    # Real dispatchers use commas with short pauses between descriptors:
+    # "male, dark hoodie, medium build" — not full stops between each.
+    segments.append(f"Suspect described as, {description}.")
 
     # Segment 3: Location + unit callout.
     # When callsign is configured address it directly; otherwise use generic.
@@ -1129,6 +1130,11 @@ async def compose_dispatch_audio(
     concat_list_path = os.path.join(serve_dir, f"{stage_label}_dispatch_concat.txt")
     all_temp_paths.append(concat_list_path)
 
+    # --- Generate priority alert tone (three ascending beeps) ---
+    alert_path = os.path.join(serve_dir, f"{stage_label}_dispatch_alert.wav")
+    all_temp_paths.append(alert_path)
+    alert_ok = await _generate_priority_alert(alert_path, sample_rate, codec)
+
     try:
         with open(concat_list_path, "w", encoding="utf-8") as fh:
             # Prepend the channel intro when it was successfully generated.
@@ -1136,6 +1142,10 @@ async def compose_dispatch_audio(
             # random chatter + closing squelch as one continuous clip.
             if intro_path and os.path.exists(intro_path):
                 fh.write(f"file '{intro_path}'\n")
+            # Priority alert tone — three ascending beeps before the dispatch
+            # call, like real MDC-1200 emergency tones.
+            if alert_ok:
+                fh.write(f"file '{alert_path}'\n")
             for i, seg_path in enumerate(segment_paths):
                 fh.write(f"file '{seg_path}'\n")
                 # Insert squelch pause between segments (not after the last one)
@@ -1583,6 +1593,96 @@ async def _generate_squelch_pause(
         return success
     except Exception as exc:
         logger.debug("radio_dispatch: squelch pause generation error: %s", exc)
+        return False
+
+
+async def _generate_priority_alert(
+    output_path: str,
+    sample_rate: str,
+    codec: str,
+) -> bool:
+    """Generate a three-tone priority alert beep (ascending pitch).
+
+    Produces three short beeps at 1000, 1200, 1400 Hz with brief gaps
+    between them, followed by a short silence.  This mimics the MDC-1200
+    emergency alert tone heard on real police radio before priority calls.
+
+    Args:
+        output_path: Path where the alert WAV should be written.
+        sample_rate: Sample rate string (e.g. ``"8000"``).
+        codec: ffmpeg codec name (e.g. ``"pcm_mulaw"``).
+
+    Returns:
+        True if the file was created successfully, False otherwise.
+    """
+    # Build an ffmpeg filter that generates three sine tones with gaps.
+    # Each beep: sine wave at freq for _ALERT_TONE_BEEP_DURATION seconds
+    # Then silence for _ALERT_TONE_GAP_DURATION seconds
+    # Final silence of _ALERT_TONE_TAIL_PAUSE seconds
+    beep = _ALERT_TONE_BEEP_DURATION
+    gap = _ALERT_TONE_GAP_DURATION
+    tail = _ALERT_TONE_TAIL_PAUSE
+    freqs = _ALERT_TONE_FREQS
+
+    # Total duration: 3 beeps + 2 gaps + tail pause
+    total_dur = len(freqs) * beep + (len(freqs) - 1) * gap + tail
+
+    # Build the filter as concatenated sine generators with silence gaps.
+    # sine=f=1000:d=0.15,aformat=...[b0]; anullsrc=...:d=0.08[g0]; ...
+    filter_parts = []
+    concat_inputs = []
+    for i, freq in enumerate(freqs):
+        # Beep
+        filter_parts.append(
+            f"sine=frequency={freq}:duration={beep}:sample_rate={sample_rate},"
+            f"aformat=sample_fmts=s16:channel_layouts=mono[b{i}]"
+        )
+        concat_inputs.append(f"[b{i}]")
+        # Gap (not after last beep — use tail pause instead)
+        if i < len(freqs) - 1:
+            filter_parts.append(
+                f"anullsrc=r={sample_rate}:cl=mono,atrim=0:{gap},"
+                f"aformat=sample_fmts=s16:channel_layouts=mono[g{i}]"
+            )
+            concat_inputs.append(f"[g{i}]")
+
+    # Tail silence
+    filter_parts.append(
+        f"anullsrc=r={sample_rate}:cl=mono,atrim=0:{tail},"
+        f"aformat=sample_fmts=s16:channel_layouts=mono[tail]"
+    )
+    concat_inputs.append("[tail]")
+
+    n = len(concat_inputs)
+    filter_complex = "; ".join(filter_parts)
+    filter_complex += f"; {''.join(concat_inputs)}concat=n={n}:v=0:a=1[out]"
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-y",
+            "-f", "lavfi", "-i", "anullsrc=r=8000:cl=mono",
+            "-filter_complex", filter_complex,
+            "-map", "[out]",
+            "-t", str(total_dur),
+            "-acodec", codec,
+            "-ar", sample_rate,
+            "-ac", "1",
+            output_path,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await asyncio.wait_for(proc.wait(), timeout=10)
+        success = proc.returncode == 0 and os.path.exists(output_path)
+        if success:
+            logger.debug("radio_dispatch: priority alert tone generated: %s", output_path)
+        else:
+            logger.debug(
+                "radio_dispatch: priority alert generation failed (rc=%d)",
+                proc.returncode,
+            )
+        return success
+    except Exception as exc:
+        logger.debug("radio_dispatch: priority alert generation error: %s", exc)
         return False
 
 

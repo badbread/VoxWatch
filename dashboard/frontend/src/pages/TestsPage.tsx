@@ -553,7 +553,7 @@ function MqttSimulationSection({ cameras }: { cameras: CameraStatus[] }) {
   // Run simulation directly from the dashboard via backend API
   const simMutation = useMutation({
     mutationFn: async () => {
-      const { data } = await (await import('@/api/client')).default.post('/api/system/mqtt-simulation', {
+      const { data } = await (await import('@/api/client')).default.post('/system/mqtt-simulation', {
         camera: selectedCamera,
         scenario: selectedScenario,
         score: 0.92,
