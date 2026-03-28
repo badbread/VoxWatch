@@ -1222,9 +1222,12 @@ class VoxWatchService:
         # Standard/non-dispatch mode: use AI description directly if present,
         # otherwise render the mode's stage3 fallback template with AI vars.
         if ai_description:
-            # AI returned something — use it directly (may be a plain sentence
-            # or a JSON phrase array from the natural cadence system).
-            escalation_message = ai_description
+            # AI returned something — parse it to extract clean text.
+            # The AI may return: plain text, JSON array, or markdown-fenced JSON.
+            # parse_ai_response handles all formats and returns clean phrases.
+            from voxwatch.speech.natural_cadence import parse_ai_response
+            parsed = parse_ai_response(ai_description)
+            escalation_message = " ".join(parsed) if parsed else ai_description
         else:
             # AI failed — build variable-substituted fallback from mode template.
             logger.warning(
