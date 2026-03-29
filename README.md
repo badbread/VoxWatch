@@ -3,6 +3,8 @@
 [![CI](https://github.com/badbread/VoxWatch/actions/workflows/ci.yml/badge.svg)](https://github.com/badbread/VoxWatch/actions/workflows/ci.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
+> **Early Alpha Release** — VoxWatch is under active development and being released early for community feedback. Expect bugs, breaking changes, and rough edges. Issues and pull requests are very welcome. See [Known Limitations](#known-limitations) below.
+
 **AI-powered security deterrent that makes your cameras talk back.**
 
 VoxWatch turns passive security cameras into active deterrents. When Frigate detects a person, VoxWatch instantly warns them over the camera speaker, then escalates with AI-generated descriptions of their appearance and behavior — all in real-time.
@@ -370,6 +372,26 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for code style and PR guidelines.
 **In progress:** Camera zones (group cameras so one detection triggers one speaker)
 
 **Planned:** Dynamic TTS library loading, custom voice models, SMS/Telegram notifications
+
+---
+
+## Known Limitations
+
+VoxWatch is an early alpha. Here's what to expect:
+
+**Latency** — There is a delay between detection and audio playback (typically 5-15 seconds for Stage 1, 30-60 seconds for the full dispatch sequence). This is inherent to the pipeline: Frigate detection + snapshot capture + AI analysis + TTS generation + audio push. We're actively working on reducing this. Local TTS providers (Kokoro, Piper) are significantly faster than cloud providers.
+
+**False Positives** — Frigate may detect "persons" that aren't there (shadows, animals, reflections). VoxWatch uses AI validation to skip escalation when the AI can't identify anyone, but Stage 1 may still fire. Tune your Frigate `min_score` threshold and zone configuration to reduce false positives.
+
+**Camera Compatibility** — Audio backchannel (pushing audio to the camera speaker) requires cameras that support two-way audio via ONVIF or RTSP backchannel. Tested primarily with Reolink cameras. See [Supported Cameras](docs/SUPPORTED_CAMERAS.md).
+
+**Single Event at a Time** — Each camera processes one detection at a time. If the same camera triggers again during an active event, it's queued or dropped depending on cooldown settings. Multiple cameras can fire simultaneously.
+
+**Cloud API Costs** — If using cloud providers (Gemini, ElevenLabs, OpenAI), each detection event costs a small amount. A busy camera with frequent detections can add up. Use local providers (Kokoro, Piper, Ollama) for zero ongoing cost.
+
+**Rough Edges** — The dashboard UI, dispatch pipeline, and voice management are functional but not polished. Config options may change between releases. The documentation is a work in progress.
+
+If you find a bug or have a suggestion, please [open an issue](https://github.com/badbread/VoxWatch/issues). Pull requests are welcome.
 
 ---
 

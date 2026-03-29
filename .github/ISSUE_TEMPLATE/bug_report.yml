@@ -1,0 +1,81 @@
+name: Bug Report
+description: Report a bug or unexpected behavior
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! VoxWatch is in early alpha, so bugs are expected. The more detail you provide, the faster we can fix it.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe what went wrong. Include what you expected vs what actually happened.
+      placeholder: "When I triggered a detection on the frontdoor camera, the dispatch audio played but the officer response was missing..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: How can we reproduce this? If it's intermittent, say so.
+      placeholder: |
+        1. Set persona to Police Dispatch
+        2. Walk in front of camera
+        3. Listen to audio output
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: "Paste relevant docker logs (`docker logs voxwatch 2>&1 | tail -50`). Redact any API keys or addresses."
+      render: shell
+
+  - type: dropdown
+    id: tts-provider
+    attributes:
+      label: TTS Provider
+      options:
+        - Kokoro
+        - Piper
+        - ElevenLabs
+        - OpenAI TTS
+        - Cartesia
+        - espeak
+        - Other
+    validations:
+      required: false
+
+  - type: dropdown
+    id: ai-provider
+    attributes:
+      label: AI Vision Provider
+      options:
+        - Gemini
+        - Ollama
+        - OpenAI
+        - Anthropic
+        - Other
+    validations:
+      required: false
+
+  - type: input
+    id: camera
+    attributes:
+      label: Camera model
+      placeholder: "Reolink CX410, Dahua IPC-Color4K, etc."
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Any relevant environment details
+      placeholder: |
+        - OS: Proxmox / Ubuntu / Synology DSM
+        - Docker version:
+        - Frigate version:
+        - VoxWatch version (from dashboard):
