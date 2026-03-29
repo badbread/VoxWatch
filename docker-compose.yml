@@ -18,8 +18,8 @@ services:
   # generates TTS audio, pushes to camera speakers.
   voxwatch:
     container_name: voxwatch
-    image: voxwatch:latest
-    # build: .                    # Uncomment to build locally instead of pulling
+    image: ghcr.io/badbread/voxwatch:latest
+    # build: .                    # Uncomment to build from source instead
     restart: unless-stopped
     network_mode: host
     environment:
@@ -46,8 +46,8 @@ services:
   # Safe to stop once you're happy with your configuration.
   voxwatch-dashboard:
     container_name: voxwatch-dashboard
-    image: voxwatch-dashboard:latest
-    # build: dashboard/           # Uncomment to build locally instead of pulling
+    image: ghcr.io/badbread/voxwatch-dashboard:latest
+    # build: dashboard/           # Uncomment to build from source instead
     restart: unless-stopped
     network_mode: host
     environment:
