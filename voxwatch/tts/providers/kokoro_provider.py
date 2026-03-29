@@ -73,12 +73,13 @@ class KokoroProvider(TTSProvider):
 
         tts_cfg = config.get("tts", {})
         # Support both nested (kokoro.host) and flat (kokoro_host) config styles.
-        # Nested is used by config.yaml direct edits, flat by the dashboard.
+        # Flat keys (written by the dashboard) take priority over nested keys
+        # because the dashboard is the most recent source of truth.
         kokoro_cfg = tts_cfg.get("kokoro", {})
-        self._voice: str = kokoro_cfg.get("voice", tts_cfg.get("kokoro_voice", "af_heart"))
-        self._speed: float = float(kokoro_cfg.get("speed", tts_cfg.get("kokoro_speed", 1.0)))
-        self._host: str | None = kokoro_cfg.get("host", tts_cfg.get("kokoro_host"))
-        self._device: str = kokoro_cfg.get("device", tts_cfg.get("kokoro_device", "cpu"))
+        self._voice: str = tts_cfg.get("kokoro_voice") or kokoro_cfg.get("voice", "af_heart")
+        self._speed: float = float(tts_cfg.get("kokoro_speed") or kokoro_cfg.get("speed", 1.0))
+        self._host: str | None = tts_cfg.get("kokoro_host") or kokoro_cfg.get("host")
+        self._device: str = tts_cfg.get("kokoro_device") or kokoro_cfg.get("device", "cpu")
         # Filter out null/empty host
         if self._host in (None, "", "null"):
             self._host = None

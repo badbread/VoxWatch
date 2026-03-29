@@ -46,7 +46,7 @@ export const CORE_MODES: ResponseModeDef[] = [
     id: 'police_dispatch',
     name: 'Police Dispatch',
     emoji: '🚔',
-    desc: 'Realistic dispatch radio. Flagship mode.',
+    desc: 'Realistic dispatch radio. Flagship mode. Best with ElevenLabs voices.',
     example:
       '"All units... 10-97 at {address}. Subject on property, dark clothing, approaching front door. Requesting nearest unit, respond."',
     isCustomizable: true,

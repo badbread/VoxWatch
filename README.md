@@ -110,7 +110,7 @@ The flagship feature. Simulates a complete police radio transmission with authen
 2. **Main Dispatch** — [beep] Female dispatcher (radio-processed): *"All units, 10-97 at 482 Elm Street. One suspect on property. Subject wearing dark hoodie, estimated six feet tall."*
 3. **Officer Response** — [beep] Male officer (different voice, radio-processed): *"Copy dispatch. Unit 7 en route. ETA two minutes."*
 
-All customizable — address, agency, callsign, officer voice, radio intensity, channel intro toggle.
+All customizable — address, agency, callsign, officer voice, radio intensity, channel intro toggle. ElevenLabs voices sound the most realistic for dispatch — the voice quality makes a big difference when you're simulating a real radio call.
 
 ### Radio Effect Presets
 
