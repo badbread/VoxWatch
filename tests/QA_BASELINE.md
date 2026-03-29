@@ -1,5 +1,5 @@
 # VoxWatch QA Baseline Manifest
-# Version: 1.5 | Date: 2026-03-27 | Coverage: All endpoints, components, and behaviors
+# Version: 1.6 | Date: 2026-03-28 | Coverage: All endpoints, components, and behaviors
 
 This manifest maps EVERY testable element in the VoxWatch system. If something
 is not listed here, it is not covered in QA. Update this document whenever the
@@ -1090,3 +1090,241 @@ No changes were required.
 ---
 
 *Generated: 2026-03-27 | Version: 1.5 | Full audit against codebase*
+
+---
+
+## Section 24: False Positive Detection -- AI All-Unknown Skip (added 2026-03-28)
+
+### voxwatch/voxwatch_service.py -- escalation guard
+
+When the dispatch escalation stage receives an AI response (JSON object), the
+service checks whether both description and location fields are "unknown"
+or empty. If both are indeterminate, the event is classified as a likely
+Frigate false positive and the escalation is suppressed.
+
+| Condition checked | Values that trigger skip |
+|-------------------|-------------------------|
+| description field | "unknown" or "" (case-insensitive, stripped) |
+| location field | "unknown" or "" (case-insensitive, stripped) |
+| Both must match | Single-field unknown does NOT suppress escalation |
+
+| Behavior when skip is triggered | Detail |
+|---------------------------------|--------|
+| Stage 1 (initial warning) | Already played -- not suppressed |
+| Stage 2 (escalation) | Skipped; _escalation_ran = False |
+| Log message | Escalation: AI returned all-unknown description -- likely false positive from Frigate. Skipping escalation. |
+| MQTT error event published | error_type="false_positive" |
+| JSON parse failure | Exception caught silently; escalation proceeds as normal |
+
+Call site: voxwatch_service.py inside _handle_detection(), after AI
+analysis result is available and before _run_escalation() is called.
+
+---
+
+## Section 25: Dispatch Pipeline Fixes (added 2026-03-28)
+
+### 25a: Stage 1 is a Direct Warning for Dispatch Modes (not radio)
+
+For police_dispatch (and all modes in DISPATCH_MODES), the Stage 1 initial
+response is a short direct deterrent warning rendered via the global TTS voice
+(not the dispatcher voice). The full radio treatment (10-codes, officer
+response, radio effects, priority alert) is reserved for the Escalation stage.
+
+| Item | Detail |
+|------|--------|
+| Code location | voxwatch_service._play_initial_response(), line ~1164 |
+| Logic | stage1_voice = None if mode_name in DISPATCH_MODES else voice_config |
+| Effect | None voice config causes generate_and_push to use global TTS settings |
+| Dispatcher voice | Only activated during _play_dispatch_escalation() |
+| Stage 1 text | Comes from the mode stage1 template (same as non-dispatch modes) |
+
+### 25b: Dispatch Escalation Uses stage_label="stage2" (not "stage3")
+
+The dispatch escalation call (_play_dispatch_escalation) passes
+stage_label="stage2" to _play_dispatch_stage. This is correct because the
+AI always returns the Stage 2 appearance schema (suspect_count / description /
+location). Using "stage3" (behavioral schema) was the previous bug.
+
+| Item | Detail |
+|------|--------|
+| Fixed call site | voxwatch_service._play_dispatch_escalation(), line ~1485 |
+| stage_label passed | "stage2" |
+| Stage 2 schema fields | suspect_count, description, location |
+| Stage 3 schema fields | behavior, movement (not used by dispatch escalation) |
+| Impact of bug | Wrong tone config key (stage3_tone) was used for attention beep lookup |
+
+### 25c: Priority Alert Tone in Dispatch Audio
+
+A three-tone ascending priority alert is generated and prepended before the
+first dispatch segment in every dispatch audio sequence.
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| _ALERT_TONE_FREQS | [1000, 1200, 1400] Hz | Ascending beep frequencies |
+| _ALERT_TONE_BEEP_DURATION | 0.15 s | Duration of each beep |
+| _ALERT_TONE_GAP_DURATION | 0.08 s | Silence between beeps |
+| _ALERT_TONE_TAIL_PAUSE | 0.3 s | Silence after the last beep |
+
+Function: radio_dispatch._generate_priority_alert(output_path, sample_rate, codec) -> bool
+Generated via ffmpeg lavfi sine source. Non-fatal if generation fails.
+Inserted in the concat list after the channel intro and before the first segment.
+Mimics MDC-1200 emergency alert tones on real police radio.
+
+### 25d: Chatter Snippets Start Mid-Word (Intentional Design)
+
+RANDOM_CHATTER entries in radio_dispatch.py intentionally start mid-word
+(e.g. "clear on Oak Avenue. Resuming patrol.", "ther action needed. Ten eight.").
+This is not a bug -- it simulates the user tuning into a radio channel
+mid-transmission, creating a realistic tail-end-of-another-call effect.
+
+The strings are used verbatim via normalize_dispatch_text(random.choice(RANDOM_CHATTER)).
+No word-boundary truncation logic is applied; the truncation is intentional design.
+
+---
+
+## Section 26: AI Prompt Enhancements (added 2026-03-28)
+
+### 26a: Dispatch Prompts -- Carried Items and Notable Actions
+
+DISPATCH_STAGE2_PROMPT in voxwatch/ai_vision/prompts.py was updated to
+explicitly request carried items and notable actions in the suspect description.
+
+| Prompt field | Updated instruction |
+|--------------|---------------------|
+| description schema comment | "sex, age-range, clothing, build, and any carried items or notable actions" |
+| Explicit examples added | "carrying backpack, looking in windows", "bags, tools, weapons", "trying doors, crouching" |
+| Example string updated | "male, dark hoodie, gray pants, medium build, carrying backpack, looking in windows" |
+
+Same additions applied to voxwatch/modes/builtin_modes.py for the
+police_dispatch built-in mode stage2 template.
+
+### 26b: Gemini maxOutputTokens Increased 300 to 500
+
+maxOutputTokens in both Gemini provider request bodies was increased from 300
+to 500 to prevent JSON truncation when AI descriptions include carried items.
+
+| Location | Line (approx) | Previous value | New value |
+|----------|---------------|----------------|-----------|
+| voxwatch/ai_vision/providers/gemini.py (non-video path) | ~97 | 300 | 500 |
+| voxwatch/ai_vision/providers/gemini.py (video path) | ~317 | 300 | 500 |
+
+A MAX_TOKENS finish reason warning was also added at line ~150:
+"Gemini response truncated (finishReason=MAX_TOKENS) -- increase maxOutputTokens if this happens frequently"
+
+This log line fires when Gemini signals it stopped due to token limit, not a
+content safety block.
+
+---
+
+## Section 27: Frontend Fixes (added 2026-03-28)
+
+### 27a: Setup Wizard Redirect Fix -- React Query Cache Invalidation
+
+Bug: After the setup wizard wrote config.yaml and navigated to /, the
+SetupGuard immediately redirected back to /setup because its cached
+setup-status query still held config_exists=false.
+
+Fix: ReviewStep.tsx now calls
+queryClient.invalidateQueries({ queryKey: ["setup-status"] }) before
+navigate("/"). This forces the SetupGuard to re-fetch and see config_exists=true.
+
+| Item | Detail |
+|------|--------|
+| File | dashboard/frontend/src/components/setup/steps/ReviewStep.tsx |
+| When triggered | countdown === 0 (just before navigation) |
+| Query key invalidated | ["setup-status"] |
+| Effect | SetupGuard re-fetches /api/setup/status before rendering / |
+
+### 27b: MQTT Simulation API Call Fix -- Removed Double /api/ Prefix
+
+Bug: The MQTT simulation button in TestsPage.tsx called
+/api/system/mqtt-simulation via an axios client that already prefixes /api/,
+resulting in a double-prefix 404.
+
+Fix: The call was changed to /system/mqtt-simulation (no /api/ prefix),
+matching how all other API calls in the page use the client.
+
+| Item | Detail |
+|------|--------|
+| File | dashboard/frontend/src/pages/TestsPage.tsx |
+| Correct path passed to client | /system/mqtt-simulation |
+| Axios client behavior | Prepends /api/ automatically |
+
+---
+
+## Section 28: Deployment and Infrastructure Changes (added 2026-03-28)
+
+### 28a: GHCR Image Publishing -- GitHub Actions Workflow
+
+New workflow: .github/workflows/docker-publish.yml
+
+| Item | Detail |
+|------|--------|
+| Trigger | Push to main branch or published release |
+| Registry | ghcr.io (GitHub Container Registry) |
+| Images built | ghcr.io/badbread/voxwatch and ghcr.io/badbread/voxwatch-dashboard |
+| Tag strategy | :latest on main, :version on semver release, :sha on every push |
+| Auth | secrets.GITHUB_TOKEN (no personal token required) |
+| Build cache | Docker Buildx with GHA cache (type=gha,mode=max) |
+| Dashboard context | dashboard/ subdirectory |
+| Core service context | Repo root . |
+
+### 28b: docker-compose.yml -- Pull from GHCR
+
+docker-compose.yml updated to reference GHCR images instead of local builds.
+
+| Service | Image |
+|---------|-------|
+| VoxWatch core | ghcr.io/badbread/voxwatch:latest |
+| VoxWatch dashboard | ghcr.io/badbread/voxwatch-dashboard:latest |
+
+Enables one-command install: users run docker compose up -d without building
+locally. Images are rebuilt and pushed automatically on every commit to main.
+
+### 28c: README Screenshots Added
+
+Two screenshots added to docs/images/ and embedded in README.md:
+
+| File | Content |
+|------|---------|
+| docs/images/dashboard.png | Dashboard view showing recent detections with expanded event detail |
+| docs/images/pipeline.png | Pipeline configuration tab showing three-stage detection flow with toggles |
+
+Screenshots placed in README after the Quick Start section, before How It Works.
+
+---
+
+## Section 29: QA Audit Log (2026-03-28 v1.6 audit)
+
+### Build Verification Results
+
+| Check | Result |
+|-------|--------|
+| python -m ruff check voxwatch/ | PASS -- All checks passed, zero lint errors |
+| cd dashboard/frontend && npx tsc --noEmit | PASS -- Zero TypeScript type errors |
+
+### New Sections Added This Audit
+
+| Section | Content |
+|---------|---------|
+| 24 | False positive detection: AI all-unknown escalation skip with MQTT error publish |
+| 25a | Stage 1 direct warning for dispatch modes (global TTS, not dispatcher voice) |
+| 25b | Dispatch escalation stage_label="stage2" fix (was incorrectly using stage3 schema) |
+| 25c | Priority alert tone: three ascending beeps (1000/1200/1400 Hz) before dispatch segments |
+| 25d | Chatter snippets: intentional mid-word start simulates radio channel tune-in |
+| 26a | AI prompt additions: carried items and notable actions in dispatch description field |
+| 26b | Gemini maxOutputTokens 300 to 500 with MAX_TOKENS truncation warning log |
+| 27a | Setup wizard redirect fix: invalidate setup-status query before navigate("/") |
+| 27b | MQTT simulation double /api/ prefix fix in TestsPage.tsx |
+| 28a | GHCR GitHub Actions workflow for automated Docker image publishing |
+| 28b | docker-compose.yml updated to reference GHCR images (one-command install) |
+| 28c | README screenshots: dashboard.png and pipeline.png added to docs/images/ |
+
+### All Previous Sections Confirmed Unchanged
+
+Sections 1-23 were not modified this audit. No regressions introduced.
+Build verification clean on both Python (ruff) and TypeScript (tsc).
+
+---
+
+*Generated: 2026-03-28 | Version: 1.6 | Session audit: dispatch fixes, false positive guard, GHCR publishing*
