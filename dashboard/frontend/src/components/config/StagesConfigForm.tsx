@@ -351,6 +351,9 @@ export function StagesConfigForm({
       <p className="text-sm text-gray-500">
         Stages fire in sequence on detection. Enable or disable each stage, then click to expand settings.
       </p>
+      <p className="text-xs text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 rounded-lg px-3 py-2">
+        Every stage publishes an MQTT event (<code className="font-mono text-blue-700 dark:text-blue-300">voxwatch/events/stage</code>) so Home Assistant can trigger different automations per stage — lights at Stage 1, notifications at Stage 2, sirens at Stage 3.
+      </p>
 
       {/* Active pipeline flow preview */}
       <div className="rounded-2xl border border-gray-200 bg-gray-50 dark:border-gray-700/40 dark:bg-gray-900/60 px-5 py-4">

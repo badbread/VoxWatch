@@ -71,6 +71,8 @@ Frigate NVR        MQTT         VoxWatch Service         MQTT        Home Assist
 
 Each stage only fires if the person is still detected (Frigate re-check). AI adapts automatically for nightvision — no color descriptions from IR footage.
 
+**Home Assistant integration:** Every stage publishes an MQTT event (`voxwatch/events/stage`) with the stage number, camera name, and AI description. Build HA automations that escalate with each stage — lights on at Stage 1, phone notification at Stage 2, sirens and door locks at Stage 3. See [Home Assistant Integration](docs/HOME_ASSISTANT.md) for examples.
+
 **Persistent Deterrence (optional):** When enabled, Stage 3 loops -- each iteration waits a configurable delay, re-checks whether the person is still present, generates a fresh AI description, and escalates the tone. The loop ends when the person leaves or a configurable max iteration count is reached. Configure in the Pipeline tab under Persistent Deterrence.
 
 ---
