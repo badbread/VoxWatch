@@ -63,7 +63,17 @@ export function CameraStatusCard({ camera }: CameraStatusCardProps) {
     camera.frigate_online,
   );
 
-  const scheduleLabel = formatScheduleLabel(config?.conditions?.active_hours);
+  // Per-camera schedule takes priority over global active_hours.
+  const cameraSchedule = config?.cameras?.[camera.name]?.schedule;
+  const scheduleLabel = cameraSchedule
+    ? cameraSchedule.mode === 'always'
+      ? '24/7'
+      : cameraSchedule.mode === 'scheduled'
+        ? `${cameraSchedule.start ?? '22:00'} - ${cameraSchedule.end ?? '06:00'}`
+        : cameraSchedule.mode === 'sunset_sunrise'
+          ? 'Sunset - Sunrise'
+          : formatScheduleLabel(config?.conditions?.active_hours)
+    : formatScheduleLabel(config?.conditions?.active_hours);
 
   return (
     <div

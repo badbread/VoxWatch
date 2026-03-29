@@ -192,7 +192,7 @@ function EventDetail({ event }: EventDetailProps) {
         <div className="px-4 py-3 border-b border-gray-700/50 space-y-1.5">
           <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wide">
             <Volume2 className="h-3.5 w-3.5" aria-hidden="true" />
-            Initial Response
+            1. Initial Response
           </div>
           <p className="text-gray-200 leading-relaxed">
             &ldquo;{event.tts_message}&rdquo;
@@ -222,7 +222,7 @@ function EventDetail({ event }: EventDetailProps) {
         <div className="px-4 py-3 border-b border-gray-700/50 space-y-1.5">
           <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wide">
             <Brain className="h-3.5 w-3.5" aria-hidden="true" />
-            AI Analysis
+            2. AI Analysis
           </div>
           <p className="text-gray-200 leading-relaxed">
             &ldquo;{formatAiDescription(event.escalation_description ?? '')}&rdquo;
@@ -235,7 +235,7 @@ function EventDetail({ event }: EventDetailProps) {
         <div className="px-4 py-3 border-b border-gray-700/50 space-y-1.5">
           <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wide">
             <Shield className="h-3.5 w-3.5" aria-hidden="true" />
-            Escalation
+            3. Escalation
           </div>
           {event.escalation_message != null && event.escalation_message !== '' && (
             <p className="text-gray-200 leading-relaxed">
@@ -407,6 +407,9 @@ export function RecentActivity() {
         <h3 className="text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-gray-400">
           Recent Detections
         </h3>
+        <span className="text-[10px] text-gray-600 dark:text-gray-600 italic">
+          click for details
+        </span>
       </div>
 
       {/* Loading skeleton */}
