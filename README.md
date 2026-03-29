@@ -38,14 +38,16 @@ Open `http://your-host:33344` — the setup wizard auto-discovers Frigate, MQTT,
 ```
 Frigate NVR        MQTT         VoxWatch Service         MQTT        Home Assistant
    ┌──────┐        Event    ┌──────────────────┐       Events    ┌─────────────────┐
-   │Detect│ ──────────────> │ Stage 1: Instant │ ──────────────> │ Lights, Locks,  │
-   │Person│                 │ Pre-cached Msg   │                 │ Notifications,  │
+   │Detect│ ──────────────> │ 1. Initial       │ ──────────────> │ Lights, Locks,  │
+   │Person│                 │    Response      │                 │ Notifications,  │
    └──────┘                 │                  │                 │ Automations     │
-                            │ Stage 2: AI      │                 └────────┬────────┘
-                            │ Description      │  voxwatch/announce       │
+                            │ 2. Escalation    │                 └────────┬────────┘
+                            │    (AI analysis) │  voxwatch/announce       │
                             │                  │ <───────────────────────┘
-                            │ Stage 3: Video   │  (TTS on camera speakers)
-                            │ Behavior         │
+                            │ 3. Persistent    │  (TTS on camera speakers)
+                            │    Deterrence    │
+                            │                  │
+                            │ 4. Resolution    │
                             └──────┬───────────┘
                                    │
                     ┌──────────────┴──────────────┐
@@ -58,13 +60,14 @@ Frigate NVR        MQTT         VoxWatch Service         MQTT        Home Assist
                             Camera Speaker
 ```
 
-### Three-Stage Escalating Deterrent
+### Four-Stage Escalating Deterrent
 
 | Stage | Timing | What Happens |
 |-------|--------|-------------|
-| **Stage 1: Instant Warning** | 0-2 seconds | Pre-cached warning plays immediately. AI analysis starts in parallel. |
-| **Stage 2: AI Description** | 5-8 seconds | AI analyzes snapshots. Describes appearance: clothing, build, height, distinctive features. The intruder hears themselves being described in real-time. |
-| **Stage 3: Behavioral Analysis** | 15-25 seconds | If person is still present, AI analyzes video/snapshots for behavior — approaching gate, testing doors, looking around. Escalates the warning. |
+| **1. Initial Response** | 0-2 seconds | Pre-cached warning plays immediately. AI analysis starts in parallel. |
+| **2. Escalation** | 5-15 seconds | AI analyzes snapshots. Describes appearance, clothing, carried items, actions. The intruder hears themselves described in real-time. |
+| **3. Persistent Deterrence** | 30s+ loops | If person stays, VoxWatch keeps warning them with fresh AI descriptions every N seconds. Tone escalates with each iteration. Configurable max iterations. |
+| **4. Resolution** | After person leaves | Optional "all clear" message. Disabled by default. |
 
 Each stage only fires if the person is still detected (Frigate re-check). AI adapts automatically for nightvision — no color descriptions from IR footage.
 
