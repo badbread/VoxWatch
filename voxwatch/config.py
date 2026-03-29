@@ -268,6 +268,15 @@ def _apply_defaults(config: dict) -> dict:
     resolution.setdefault("enabled", False)
     resolution.setdefault("message", "Area clear.")
 
+    # Persistent deterrence defaults (Stage 3 — loops after escalation)
+    persistent = pipeline.setdefault("persistent_deterrence", {})
+    persistent.setdefault("enabled", False)  # Off by default
+    persistent.setdefault("delay_seconds", 30)
+    persistent.setdefault("max_iterations", 5)
+    persistent.setdefault("alarm_tone", "none")  # "none", "brief", "continuous"
+    persistent.setdefault("describe_actions", True)
+    persistent.setdefault("escalation_tone", "increasing")  # "steady" or "increasing"
+
     # MQTT event publishing — VoxWatch publishes events for Home Assistant.
     mqtt_pub = config.setdefault("mqtt_publish", {})
     if mqtt_pub is None:

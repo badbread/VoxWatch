@@ -284,11 +284,23 @@ export interface PipelineResolution {
  * The legacy `stages` array is kept optional so existing config.yaml files
  * that still use the old format can be loaded without errors.
  */
+/** Persistent Deterrence (Stage 3) — loops after escalation if person stays. */
+export interface PipelinePersistentDeterrence {
+  enabled: boolean;
+  delay_seconds: number;
+  max_iterations: number;
+  alarm_tone: 'none' | 'brief' | 'continuous';
+  describe_actions: boolean;
+  escalation_tone: 'steady' | 'increasing';
+}
+
 export interface PipelineConfig {
   /** Initial Response stage settings. */
   initial_response?: PipelineInitialResponse;
   /** Escalation stage settings. */
   escalation?: PipelineEscalation;
+  /** Persistent Deterrence — loops if person stays after escalation. */
+  persistent_deterrence?: PipelinePersistentDeterrence;
   /** Resolution stage settings. */
   resolution?: PipelineResolution;
   /**

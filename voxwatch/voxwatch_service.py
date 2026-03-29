@@ -1015,6 +1015,24 @@ class VoxWatchService:
             ai_prep_task.cancel()
             logger.info("Escalation: disabled in config — done.")
 
+        # ── Step E2: Persistent Deterrence (loop) ──────────────────────────
+        # If person is still present after escalation, keep engaging them
+        # with fresh AI descriptions until they leave or max iterations hit.
+        _persist_iterations: int = 0
+        persist_cfg = pipeline_cfg.get("persistent_deterrence", {})
+        if persist_cfg.get("enabled", False) and _escalation_ran and _escalation_audio_success:
+            _persist_iterations = await self._run_persistent_deterrence(
+                event_id=event_id,
+                camera_name=camera_name,
+                camera_stream=camera_stream,
+                mode_name=mode_name,
+                last_description=_escalation_description,
+                voice_config=_active_mode_obj.voice,
+                persist_cfg=persist_cfg,
+                pipeline_start_ts=_pipeline_start_ts,
+                vw_event_id=vw_event_id,
+            )
+
         # ── Step F: Resolution (optional) ─────────────────────────────────
         # Resolution is off by default (most deployments don't need it).
         if resolution_cfg.get("enabled", False):
@@ -1086,6 +1104,7 @@ class VoxWatchService:
             "stage3_ran": _escalation_ran,
             "stage3_description": _escalation_description,
             "stage3_audio_success": _escalation_audio_success,
+            "persistent_deterrence_iterations": _persist_iterations,
             "total_latency_ms": total_latency_ms,
         }
         # Pass the operator-configured rotation threshold so the events file is
@@ -1493,6 +1512,211 @@ class VoxWatchService:
             fallback_text=fallback,
         )
         return push_ok
+
+    async def _run_persistent_deterrence(
+        self,
+        event_id: str,
+        camera_name: str,
+        camera_stream: str,
+        mode_name: str,
+        last_description: str | None,
+        voice_config: "VoiceConfig | None",
+        persist_cfg: dict,
+        pipeline_start_ts: float,
+        vw_event_id: str,
+    ) -> int:
+        """Run the persistent deterrence loop (Stage 3).
+
+        Keeps generating fresh AI descriptions and pushing audio until the person
+        leaves or max_iterations is reached.  Called after a successful escalation
+        (Stage 2) when ``pipeline.persistent_deterrence.enabled`` is ``true``.
+
+        Each iteration:
+          1. Waits ``delay_seconds`` before acting.
+          2. Checks whether the person is still present via Frigate snapshots.
+          3. Generates a fresh AI description of what they are currently doing
+             (if ``describe_actions`` is true).
+          4. Pushes TTS audio to the camera speaker.
+          5. Publishes a stage-3 MQTT event.
+
+        Args:
+            event_id: Frigate event ID for the current detection.
+            camera_name: Frigate camera name (used for presence checks and MQTT).
+            camera_stream: go2rtc stream name for audio push.
+            mode_name: Active response mode name (for MQTT metadata).
+            last_description: AI description from the escalation stage, used as
+                context for subsequent prompts.
+            voice_config: VoiceConfig from the active mode (may be None for defaults).
+            persist_cfg: The ``pipeline.persistent_deterrence`` config sub-dict.
+            pipeline_start_ts: ``time.monotonic()`` value from pipeline start, used
+                to compute elapsed time for AI prompts.
+            vw_event_id: VoxWatch event ID for MQTT ``publish_stage`` calls.
+
+        Returns:
+            Number of deterrence iterations that actually executed (0 if the
+            person left before any iteration fired audio, or if the loop was
+            skipped entirely).
+        """
+        delay = float(persist_cfg.get("delay_seconds", 30))
+        max_iter = int(persist_cfg.get("max_iterations", 5))
+        describe = persist_cfg.get("describe_actions", True)
+        tone_style = persist_cfg.get("escalation_tone", "increasing")
+
+        iterations_completed = 0
+
+        for iteration in range(1, max_iter + 1):
+            # Wait before acting so the camera has time to settle between warnings.
+            logger.info(
+                "Persistent deterrence: iteration %d/%d — waiting %.0fs...",
+                iteration,
+                max_iter,
+                delay,
+            )
+            await asyncio.sleep(delay)
+
+            # Check whether the person is still on-property before spending time
+            # on AI analysis and audio generation.
+            try:
+                still_present = await check_person_still_present(
+                    self.config,
+                    camera_name,
+                )
+            except Exception as exc:
+                logger.error("Persistent deterrence: presence check error: %s", exc)
+                break
+
+            if not still_present:
+                logger.info(
+                    "Persistent deterrence: person left after iteration %d.",
+                    iteration,
+                )
+                break
+
+            logger.info(
+                "Persistent deterrence: person still present — iteration %d/%d",
+                iteration,
+                max_iter,
+            )
+
+            # Elapsed wall-clock seconds since the original detection fired.
+            elapsed_seconds = int(time.monotonic() - pipeline_start_ts)
+
+            # Generate fresh AI description if enabled; fall back to canned text.
+            message: str
+            if describe:
+                try:
+                    snapshot_count = self.config.get("stage2", {}).get("snapshot_count", 3)
+                    snapshots = await grab_snapshots(
+                        self.config,
+                        event_id,
+                        camera_name,
+                        snapshot_count,
+                        500,
+                    )
+
+                    if snapshots:
+                        # Build a persistent deterrence prompt that escalates with
+                        # each iteration so the language grows progressively firmer.
+                        base_prompt = (
+                            f"You are monitoring a person who has been warned "
+                            f"{iteration + 1} times and has been on the property "
+                            f"for {elapsed_seconds} seconds. They have NOT left. "
+                        )
+                        if last_description:
+                            base_prompt += f"Previous description: {last_description}. "
+                        base_prompt += (
+                            "Describe what they are CURRENTLY doing in one sentence. "
+                            "Be specific about their actions and body language. "
+                            "Address them directly using 'you'. "
+                            "Make it clear this is an ongoing situation and their "
+                            "continued presence is being documented. "
+                            "Respond with ONLY one sentence, under 25 words."
+                        )
+
+                        # Adjust tone based on iteration depth.
+                        if tone_style == "increasing":
+                            if iteration <= 2:
+                                base_prompt += " Tone: firm and direct."
+                            elif iteration <= 4:
+                                base_prompt += " Tone: stern and urgent."
+                            else:
+                                base_prompt += " Tone: very serious, final warning energy."
+
+                        raw_description = await analyze_snapshots(
+                            snapshots, base_prompt, self.config
+                        )
+
+                        # Use natural cadence parser to clean up the AI output the
+                        # same way the escalation stage does.
+                        from voxwatch.speech.natural_cadence import parse_ai_response
+                        parsed = parse_ai_response(raw_description)
+                        message = " ".join(parsed) if parsed else raw_description
+                        last_description = raw_description
+                    else:
+                        # No snapshots available — use a canned fallback.
+                        message = (
+                            f"You are still here. This is warning number {iteration + 1}. "
+                            "You are being recorded. Leave now."
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "Persistent deterrence: AI analysis failed on iteration %d: %s",
+                        iteration,
+                        exc,
+                    )
+                    message = (
+                        f"You are still on the property. This is warning number "
+                        f"{iteration + 1}. Leave immediately."
+                    )
+            else:
+                # describe_actions disabled — use canned messages throughout.
+                message = (
+                    f"Warning number {iteration + 1}. You are still being monitored. "
+                    "Leave the property now."
+                )
+
+            logger.info(
+                "Persistent deterrence [%d/%d]: '%s...'",
+                iteration,
+                max_iter,
+                message[:80],
+            )
+
+            # Push audio to the camera speaker.
+            push_ok = await self._audio.generate_and_push(
+                camera_stream,
+                message,
+                f"persist_{iteration}",
+                voice_config,
+            )
+
+            if push_ok:
+                record_audio_push(self._camera_stats, camera_name, True)
+
+            iterations_completed += 1
+
+            # Publish MQTT stage event so Home Assistant can track deterrence depth.
+            if self._publisher:
+                self._publisher.publish_stage(
+                    vw_event_id=vw_event_id,
+                    camera=camera_name,
+                    stage=3,
+                    mode=mode_name,
+                    audio_pushed=push_ok,
+                    ai_analysis={
+                        "behavior": message,
+                        "iteration": iteration,
+                        "elapsed_seconds": elapsed_seconds,
+                    },
+                    frigate_event_id=event_id,
+                )
+
+        logger.info(
+            "Persistent deterrence: loop complete (%d/%d iterations ran).",
+            iterations_completed,
+            max_iter,
+        )
+        return iterations_completed
 
     async def _play_resolution(
         self,

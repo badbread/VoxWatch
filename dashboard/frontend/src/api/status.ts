@@ -326,6 +326,7 @@ export interface DetectionEvent {
   tts_provider?: string | null;
   tts_voice?: string | null;
   ai_provider?: string | null;
+  persistent_deterrence_iterations?: number;
   total_latency_ms?: number | null;
 }
 

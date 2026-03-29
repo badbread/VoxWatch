@@ -19,6 +19,7 @@ import { useState } from 'react';
 import {
   Zap,
   TrendingUp,
+  RefreshCw,
   CheckCircle,
   ArrowRight,
 } from 'lucide-react';
@@ -318,6 +319,10 @@ export function StagesConfigForm({
     }
   };
 
+  const updatePersistentDeterrence = (patch: Record<string, unknown>) => {
+    updatePipeline({ persistent_deterrence: { ...persistentDeterrence, ...patch } });
+  };
+
   const updateResolution = (patch: Partial<PipelineResolution>) => {
     updatePipeline({ resolution: { ...resolution, ...patch } });
   };
@@ -330,6 +335,10 @@ export function StagesConfigForm({
   }
   if (escalation.enabled) {
     activeStagePills.push({ label: 'Escalation', color: 'bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-400 dark:border-blue-800/40' });
+  }
+  const persistentDeterrence = pipeline?.persistent_deterrence ?? { enabled: false, delay_seconds: 30, max_iterations: 5, alarm_tone: 'none', describe_actions: true, escalation_tone: 'increasing' };
+  if (persistentDeterrence.enabled) {
+    activeStagePills.push({ label: 'Persistent Deterrence', color: 'bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-900/30 dark:text-orange-400 dark:border-orange-800/40' });
   }
   if (resolution.enabled) {
     activeStagePills.push({ label: 'Resolution', color: 'bg-green-100 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800/40' });
@@ -594,10 +603,105 @@ export function StagesConfigForm({
           </div>
         </StageCard>
 
-        {/* 3. Resolution */}
+        {/* 3. Persistent Deterrence */}
+        <StageCard
+          id="persistent_deterrence"
+          label="3. Persistent Deterrence"
+          description="Continues engaging if person stays after escalation. Loops with fresh AI descriptions."
+          icon={RefreshCw}
+          iconColor="text-orange-500"
+          enabled={persistentDeterrence.enabled}
+          expanded={expandedStage === "persistent_deterrence"}
+          onExpand={setExpandedStage}
+          onToggle={(enabled) => updatePersistentDeterrence({ enabled })}
+        >
+          <div className="space-y-3">
+            <p className="text-xs text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20 rounded px-3 py-2">
+              After escalation, if the person is still present, VoxWatch will keep generating fresh AI descriptions of their actions every loop until they leave or the max is reached.
+            </p>
+
+            <div className="grid grid-cols-2 gap-3">
+              <Field
+                label="Loop Delay (seconds)"
+                hint="Pause between each deterrence iteration."
+              >
+                <input
+                  type="number"
+                  min={10}
+                  max={120}
+                  step={5}
+                  value={persistentDeterrence.delay_seconds ?? 30}
+                  onChange={(e) => updatePersistentDeterrence({ delay_seconds: Number(e.target.value) })}
+                  className={inputCls(false)}
+                />
+              </Field>
+
+              <Field
+                label="Max Iterations"
+                hint="Safety cap to prevent runaway AI costs."
+              >
+                <input
+                  type="number"
+                  min={1}
+                  max={20}
+                  step={1}
+                  value={persistentDeterrence.max_iterations ?? 5}
+                  onChange={(e) => updatePersistentDeterrence({ max_iterations: Number(e.target.value) })}
+                  className={inputCls(false)}
+                />
+              </Field>
+            </div>
+
+            <div className="space-y-2">
+              <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                <input
+                  type="checkbox"
+                  checked={persistentDeterrence.describe_actions ?? true}
+                  onChange={(e) => updatePersistentDeterrence({ describe_actions: e.target.checked })}
+                  className="h-3.5 w-3.5 rounded border-gray-300 text-orange-600"
+                />
+                Generate fresh AI descriptions each loop
+              </label>
+              <p className="ml-6 text-xs text-gray-400">
+                When disabled, uses a canned "you are still being monitored" message instead (no AI cost).
+              </p>
+            </div>
+
+            <Field
+              label="Tone Escalation"
+              hint="How the message urgency changes across iterations."
+            >
+              <select
+                value={persistentDeterrence.escalation_tone ?? 'increasing'}
+                onChange={(e) => updatePersistentDeterrence({ escalation_tone: e.target.value })}
+                className={inputCls(false)}
+              >
+                <option value="increasing">Increasing — gets more urgent each loop</option>
+                <option value="steady">Steady — same tone throughout</option>
+              </select>
+            </Field>
+
+            <Field
+              label="Alarm Tone"
+              hint="Sound played before each deterrence message."
+            >
+              <select
+                value={persistentDeterrence.alarm_tone ?? 'none'}
+                onChange={(e) => updatePersistentDeterrence({ alarm_tone: e.target.value })}
+                className={inputCls(false)}
+              >
+                <option value="none">None</option>
+                <option value="brief">Brief beep before each message</option>
+                <option value="continuous">Continuous alarm overlay</option>
+              </select>
+            </Field>
+          </div>
+        </StageCard>
+
+        {/* 4. Resolution */}
         <StageCard
           id="resolution"
-          label="3. Resolution"
+          label="4. Resolution"
           description="Optional message when the person leaves. Plays after last active stage."
           icon={CheckCircle}
           iconColor="text-green-500"
