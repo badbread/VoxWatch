@@ -68,6 +68,8 @@ Frigate NVR        MQTT         VoxWatch Service         MQTT        Home Assist
 
 Each stage only fires if the person is still detected (Frigate re-check). AI adapts automatically for nightvision — no color descriptions from IR footage.
 
+**Persistent Deterrence (optional):** When enabled, Stage 3 loops -- each iteration waits a configurable delay, re-checks whether the person is still present, generates a fresh AI description, and escalates the tone. The loop ends when the person leaves or a configurable max iteration count is reached. Configure in the Pipeline tab under Persistent Deterrence.
+
 ---
 
 ## Response Modes
@@ -121,6 +123,36 @@ All customizable — address, agency, callsign, officer voice, radio intensity, 
 | **high** | Gritty scanner sound | Maximum intimidation |
 
 Fine-grained control: bandpass frequency, compression, noise level, squelch toggle.
+
+---
+
+## Camera Zones
+
+Group cameras by physical area so that one detection triggers one speaker and all cameras in the zone share a single cooldown timer.
+
+Useful when multiple cameras cover the same area (e.g. two angles on the front gate) -- without zones, each camera fires independently and the intruder hears duplicate audio.
+
+```yaml
+zones:
+  front_yard:
+    cameras: [frontdoor, driveway]
+    speaker: frontdoor        # audio always plays on this camera
+    cooldown_seconds: 90      # optional per-zone cooldown override
+
+  back_yard:
+    cameras: [backgate, patio]
+    speaker: backgate
+```
+
+| Behavior | Detail |
+|----------|--------|
+| Shared cooldown | Keyed by zone name ("zone:front_yard"). First camera to fire blocks the rest. |
+| Speaker routing | Audio pushed to the zone speaker stream, not the triggering camera stream. |
+| Zone cooldown | Overrides global cooldown when set; falls back to global when omitted. |
+| Per-camera override | A camera not in any zone still supports audio_output for individual speaker routing. |
+
+Configure zones in the **Camera Zones** tab of the Config editor.
+
 
 ---
 
@@ -336,6 +368,10 @@ services:
 | **Sunset to Sunrise** | `mode: "sunset_sunrise"` | Solar calculation via `astral` library |
 | **Fixed Window** | `mode: "fixed"` | Custom start/end times (handles midnight crossing) |
 
+**Per-camera schedules:** Each camera can override the global active hours with its own schedule. Set a camera's schedule to always, a fixed time window, or sunset-to-sunrise -- independently of every other camera. Cameras with no per-camera schedule fall back to the global setting. Configure per-camera schedules in the **Detection** tab of the Config editor, or in the camera detail panel.
+
+You can also specify a city name (e.g. city: "Seattle") instead of explicit latitude/longitude for sunset/sunrise calculations. VoxWatch uses the astral library's built-in geocoder database for city name resolution.
+
 ---
 
 ## Legal Considerations
@@ -369,11 +405,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for code style and PR guidelines.
 
 ## Roadmap
 
-**Recently shipped:** Home Assistant two-way MQTT, TTS announce API, persona customization, Docker optimization (49% size reduction), natural cadence speech, email camera reports
+**Recently shipped:** Camera zones (shared cooldown + speaker routing), per-camera schedules, persistent deterrence loop (Stage 3), per-camera audio output override, Home Assistant MQTT, natural cadence speech
 
-**In progress:** Camera zones (group cameras so one detection triggers one speaker)
+**In progress:** Dynamic TTS library loading, custom voice models
 
-**Planned:** Dynamic TTS library loading, custom voice models, SMS/Telegram notifications
+**Planned:** SMS/Telegram notifications
 
 ---
 

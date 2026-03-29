@@ -607,7 +607,7 @@ export function StagesConfigForm({
         <StageCard
           id="persistent_deterrence"
           label="3. Persistent Deterrence"
-          description="Continues engaging if person stays after escalation. Loops with fresh AI descriptions."
+          description="If person stays after escalation, keeps warning them with fresh AI descriptions every N seconds."
           icon={RefreshCw}
           iconColor="text-orange-500"
           enabled={persistentDeterrence.enabled}
@@ -617,13 +617,13 @@ export function StagesConfigForm({
         >
           <div className="space-y-3">
             <p className="text-xs text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20 rounded px-3 py-2">
-              After escalation, if the person is still present, VoxWatch will keep generating fresh AI descriptions of their actions every loop until they leave or the max is reached.
+              After the Escalation stage completes, VoxWatch waits the configured delay, then checks if the person is still present. If yes, it generates a fresh AI description of their current actions and pushes another warning. This repeats until the person leaves or the max iteration count is reached.
             </p>
 
             <div className="grid grid-cols-2 gap-3">
               <Field
-                label="Loop Delay (seconds)"
-                hint="Pause between each deterrence iteration."
+                label="Delay Between Warnings (seconds)"
+                hint="How long to wait after escalation (and between each loop iteration) before the next warning. The first persistent deterrence warning fires this many seconds after the escalation stage completes."
               >
                 <input
                   type="number"

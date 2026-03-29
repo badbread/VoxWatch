@@ -1,5 +1,5 @@
 # VoxWatch QA Baseline Manifest
-# Version: 1.6 | Date: 2026-03-28 | Coverage: All endpoints, components, and behaviors
+# Version: 1.7 | Date: 2026-03-29 | Coverage: All endpoints, components, and behaviors
 
 This manifest maps EVERY testable element in the VoxWatch system. If something
 is not listed here, it is not covered in QA. Update this document whenever the
@@ -1328,3 +1328,284 @@ Build verification clean on both Python (ruff) and TypeScript (tsc).
 ---
 
 *Generated: 2026-03-28 | Version: 1.6 | Session audit: dispatch fixes, false positive guard, GHCR publishing*
+
+
+---
+
+## Section 30: Camera Zones (added 2026-03-29)
+
+### Data Model: ZoneConfig (dashboard/backend/models/config_models.py)
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| cameras | list[str] | required | Camera names in this zone |
+| speaker | str | required | Which camera speaker plays audio when any zone camera triggers |
+| cooldown_seconds | int or None | None | Zone-level cooldown override; falls back to global when None |
+
+Validation: speaker_must_be_in_cameras model validator enforces that the speaker value is present in the cameras list. Raises ValueError if not.
+
+Top-level config field: zones: dict[str, ZoneConfig] | None on VoxWatchConfig. None means no zones configured.
+
+### Service: _resolve_zone() (voxwatch/voxwatch_service.py)
+
+Signature: _resolve_zone(camera_name: str) -> tuple[str | None, dict | None]
+
+Scans self.config["zones"] dict. Returns the first zone name and config dict whose cameras list contains camera_name. Returns (None, None) if not found or zones key is missing.
+
+### Zone Cooldown Keying
+
+When a camera is in a zone, the cooldown shared-state key is "zone:{zone_name}" (e.g. "zone:front_yard"). Non-zone cameras use the camera name as the key. All cameras in the same zone share a single cooldown slot.
+
+Cooldown seconds resolution for zone cameras:
+1. zone_cfg["cooldown_seconds"] (when set, non-None)
+2. conditions["cooldown_seconds"] (global fallback, default 60)
+
+### Zone Speaker Routing (voxwatch_service.py)
+
+When a zone is resolved: speaker_name = zone_cfg.get("speaker", camera_name). Speaker camera CameraConfig is loaded to get its go2rtc stream. Audio push targets that stream, not the triggering camera stream.
+
+When no zone: audio_output = camera_cfg.get("audio_output", "").strip(); camera_stream = audio_output or camera_cfg.get("go2rtc_stream", camera_name).
+
+### Frontend: Camera Zones Tab (ConfigEditor.tsx)
+
+New tab added: { id: zones, label: Camera Zones, icon: MapPin, section: conditions }
+
+Updated tab order (7 tabs): 1. Personality, 2. TTS, 3. Detection, 4. Camera Zones (new), 5. Pipeline, 6. AI Provider, 7. Connections
+
+### Frontend: ZonesConfigForm Component
+
+File: dashboard/frontend/src/components/config/ZonesConfigForm.tsx
+
+| Behavior | Detail |
+|----------|--------|
+| Empty state | Dashed border card with MapPin icon; "No zones configured. Cameras operate independently." |
+| Add zone | Text input + Add Zone button. Name lowercased, spaces -> underscores. Duplicate names blocked. |
+| Zone card | Zone name, camera count, camera chip list (with remove buttons), speaker dropdown, cooldown input |
+| Camera assignment | Dropdown shows unassigned cameras plus cameras already in this zone. A camera cannot be in multiple zones. |
+| Speaker auto-set | First camera added to a zone is automatically set as the speaker. |
+| Speaker cleared | If speaker camera chip removed, speaker resets to first remaining camera or empty string. |
+| Cooldown field | Number input (min 10, max 600, step 10). Empty removes override (falls back to global). |
+| Zone removal | Delete button. When last zone removed, onChange(undefined) clears the zones key from config. |
+
+Props: zones: Record<string, ZoneConfig> | undefined, cameras: Record<string, CameraConfig>, onChange: (zones | undefined) => void
+
+---
+
+## Section 31: Per-Camera Schedules (added 2026-03-29)
+
+### Data Model: CameraSchedule (dashboard/backend/models/config_models.py)
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| mode | str | always | always, scheduled, or sunset_sunrise |
+| start | str | 22:00 | Start time HH:MM (scheduled mode only) |
+| end | str | 06:00 | End time HH:MM (scheduled mode only) |
+| sunset_offset_minutes | int | 0 | Offset from sunset in minutes; negative = before sunset |
+| sunrise_offset_minutes | int | 0 | Offset from sunrise in minutes; positive = after sunrise |
+
+CameraSchedule is an optional sub-object on CameraConfig.schedule (default None). When None, the camera uses the global conditions.active_hours setting.
+
+### Service: is_camera_active() (voxwatch/conditions.py)
+
+Signature: is_camera_active(config, camera_name, _logger) -> bool
+
+Priority: per-camera schedule > global active_hours.
+
+| Condition | Behavior |
+|-----------|----------|
+| camera_cfg.schedule is None/absent | Falls back to is_active_hours(config) (global) |
+| mode == always | Returns True (24/7) |
+| mode == scheduled | Delegates to is_within_window(start, end) |
+| mode == sunset_sunrise | Delegates to is_between_sunset_and_sunrise(config, sunset_offset_minutes, sunrise_offset_minutes) |
+| Unknown mode | Logs warning, defaults to True (safe -- never silently suppresses events) |
+
+### City-Based Sunset Lookup (voxwatch/conditions.py)
+
+_resolve_coordinates(conditions) priority chain:
+1. conditions.city -- name string looked up via astral.geocoder.lookup(). Returns lat/lon from the geocoder database.
+2. conditions.latitude + conditions.longitude -- explicit coordinate pair.
+3. San Francisco default coordinates -- hardcoded fallback.
+
+When astral.geocoder raises any exception on a city lookup, a warning is logged and the fallback is used. conditions.city is a convenience alias for common city names in the astral built-in database.
+
+### Frontend: Detection Tab -- Per-Camera Schedule Rows
+
+File: dashboard/frontend/src/components/config/ConditionsConfigForm.tsx
+
+CameraScheduleRow component: one row per configured camera in the Detection tab.
+
+| Mode selection | Result |
+|---------------|--------|
+| global | Removes schedule key from that camera config (falls back to global) |
+| always | Sets schedule: { mode: always } |
+| scheduled | Sets schedule with mode, start, end and inline time inputs |
+| sunset_sunrise | Sets schedule with mode and offset number inputs |
+
+### Frontend: Camera Card Schedule Display (CameraStatusCard.tsx)
+
+The footer row of each camera card shows a schedule label from the per-camera schedule if present, otherwise from global conditions.active_hours:
+
+| Schedule source | Label shown |
+|-----------------|-------------|
+| Per-camera mode always | 24/7 |
+| Per-camera mode scheduled | {start} - {end} (e.g. 22:00 - 06:00) |
+| Per-camera mode sunset_sunrise | Sunset - Sunrise |
+| No per-camera schedule | Global active_hours label via formatScheduleLabel() |
+
+---
+
+## Section 32: Persistent Deterrence -- Stage 3 (added 2026-03-29)
+
+### Config Fields (voxwatch/config.py _apply_defaults)
+
+Config path: pipeline.persistent_deterrence
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| enabled | bool | false | Enable persistent deterrence loop |
+| delay_seconds | float | 30 | Seconds to wait between each deterrence iteration |
+| max_iterations | int | 5 | Maximum number of loop iterations |
+| alarm_tone | str | none | Tone played between iterations: none, brief, continuous |
+| describe_actions | bool | true | Generate fresh AI description each iteration; false uses canned messages |
+| escalation_tone | str | increasing | steady (same tone) or increasing (escalates across iterations) |
+| tone_levels | list[str] | 3-item default list | Custom AI tone instruction strings per escalation tier |
+
+Default tone_levels when not configured:
+- Tone: firm and direct.
+- Tone: stern and urgent.
+- Tone: very serious, final warning energy.
+
+### Service: _run_persistent_deterrence() (voxwatch/voxwatch_service.py)
+
+Signature: async _run_persistent_deterrence(event_id, camera_name, camera_stream, mode_name, last_description, voice_config, persist_cfg, pipeline_start_ts, vw_event_id) -> int
+
+Returns the number of iterations completed with audio. Called from _handle_detection() after successful escalation when pipeline.persistent_deterrence.enabled is True.
+
+Trigger condition: _escalation_ran=True AND _escalation_audio_success=True
+
+Loop behavior per iteration:
+1. asyncio.sleep(delay_seconds) -- waits before acting.
+2. check_person_still_present() -- presence check via Frigate snapshots. Breaks loop if person left.
+3. If describe_actions=True: fetches fresh AI description; includes elapsed time since detection start for context.
+4. If describe_actions=False: uses canned deterrence messages.
+5. Applies tone level: when escalation_tone == increasing, selects a tone from tone_levels distributed evenly across max_iterations. Appended as suffix to the AI base prompt.
+6. Pushes audio to camera_stream.
+7. Publishes MQTT stage event.
+
+Result logged in events.jsonl as persistent_deterrence_iterations: N.
+
+### TypeScript Interface: PipelinePersistentDeterrence (dashboard/frontend/src/types/config.ts)
+
+Fields: enabled: boolean, delay_seconds: number, max_iterations: number, alarm_tone: none|brief|continuous, describe_actions: boolean, escalation_tone: steady|increasing, tone_levels?: string[]
+
+Added to PipelineConfig.persistent_deterrence?: PipelinePersistentDeterrence.
+
+### Frontend: Pipeline Tab -- Persistent Deterrence Card (StagesConfigForm.tsx)
+
+Stage card ID: persistent_deterrence. Rendered in the Pipeline tab between Escalation and Resolution.
+
+UI controls: enable/disable toggle, delay between warnings (seconds), max iterations, alarm tone (none/brief/continuous), describe actions checkbox, escalation tone (steady/increasing), tone levels editable list (shown only when escalation_tone == increasing).
+
+---
+
+## Section 33: Per-Camera Audio Output Override (added 2026-03-29)
+
+### Config Field: audio_output (CameraConfig)
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| audio_output | str or None | None | Override speaker for this camera detections. Set to another camera go2rtc stream name. |
+
+When set, audio from this camera detections is routed to the audio_output stream instead of the camera own stream. Value is stripped of whitespace; empty string is treated as unset.
+
+Audio output resolution order (non-zone cameras):
+1. camera_cfg["audio_output"] if non-empty after strip
+2. camera_cfg["go2rtc_stream"] if set
+3. Camera name as fallback stream name
+
+### Frontend: Audio Output Speaker Dropdown (CameraDetail.tsx)
+
+Location: Camera detail panel (Cameras page), after the go2rtc stream name field.
+
+- select populated with all other configured camera names (not the current camera).
+- Default option: Same camera (default) maps to empty string.
+- On change: writes audio_output to the camera draft config.
+- Helper text: Which camera speaker plays audio when this camera detects someone.
+
+
+---
+
+## Section 34: Dashboard Redesign (added 2026-03-29)
+
+### DashboardPage Layout (dashboard/frontend/src/pages/DashboardPage.tsx)
+
+Redesigned from a config-heavy admin panel into a reactive status-first layout.
+
+| Section | Component | Description |
+|---------|-----------|-------------|
+| 1. System Hero | ServiceStatusCard | Full-width status card with pulsing dot, headline, stat row, most-recent detection |
+| 2. Camera Grid | CameraStatusGrid | VoxWatch-enabled cameras only; clicking navigates to /cameras?selected={name} |
+| 3. Recent Activity | RecentActivity | Stacked detection event feed |
+| 4. Support Footer | SupportCard | Minimal single-line coffee link |
+
+Changes from previous dashboard:
+- Quick Actions section removed entirely (QuickActions component no longer rendered in DashboardPage)
+- Camera grid filtered to VoxWatch-enabled cameras only (not all Frigate cameras)
+- Support footer is minimal single-line (not a full card block)
+- No new API calls -- all data flows from useServiceStatus() and useConfigQuery() shared polling
+
+
+---
+
+## Section 35: Security Cleanup (added 2026-03-29)
+
+### CI Workflow: .github/workflows/ci.yml
+
+The credential scan step uses a regex pattern to detect literal password assignments. No hardcoded passwords or MQTT credentials remain in the CI workflow file itself.
+
+### Documentation Sanitization
+
+Camera layout references and credential examples in documentation were reviewed. No literal credentials remain in committed docs. All config examples use ${ENV_VAR} token substitution patterns.
+
+
+---
+
+## Section 36: Setup Wizard Redirect Fix Re-Confirmed (2026-03-29)
+
+Originally documented in Section 27a (v1.6 audit). Behavior confirmed unchanged.
+
+File: dashboard/frontend/src/components/setup/steps/ReviewStep.tsx
+
+After POST /api/setup/generate-config succeeds and the countdown reaches 0, queryClient.invalidateQueries({ queryKey: ["setup-status"] }) is called before navigate("/"). This forces SetupGuard to re-fetch /api/setup/status and see config_exists=true, preventing an immediate redirect back to /setup.
+
+---
+
+## Section 37: QA Audit Log (2026-03-29 v1.7 audit)
+
+### Build Verification Results
+
+| Check | Result |
+|-------|--------|
+| python -m ruff check voxwatch/ | PASS -- All checks passed, zero lint errors |
+| cd dashboard/frontend && npx tsc --noEmit | PASS -- Zero TypeScript type errors |
+
+### New Sections Added This Audit
+
+| Section | Content |
+|---------|---------|
+| 30 | Camera Zones: ZoneConfig model, _resolve_zone(), zone cooldown keying (zone:{name}), speaker routing, Camera Zones tab (7th tab), ZonesConfigForm component |
+| 31 | Per-camera schedules: CameraSchedule model, is_camera_active(), city-based sunset lookup, Detection tab schedule rows, camera card schedule display logic |
+| 32 | Persistent Deterrence Stage 3: _run_persistent_deterrence() loop, configurable tone_levels, alarm_tone, PipelinePersistentDeterrence TypeScript type, Pipeline tab card |
+| 33 | Per-camera audio output: audio_output CameraConfig field, Audio Output Speaker dropdown in CameraDetail |
+| 34 | Dashboard redesign: VoxWatch-only camera grid, Quick Actions removed, minimal support footer, four-section layout |
+| 35 | Security cleanup: CI credential scan pattern hardening, docs sanitization |
+| 36 | Setup wizard redirect fix re-confirmed (Section 27a original) |
+
+### All Previous Sections Confirmed Unchanged
+
+Sections 1-29 were not modified this audit. No regressions introduced.
+Build verification clean on both Python (ruff) and TypeScript (tsc).
+
+---
+
+*Generated: 2026-03-29 | Version: 1.7 | Session audit: zones, per-camera schedules, persistent deterrence, audio output override, dashboard redesign*

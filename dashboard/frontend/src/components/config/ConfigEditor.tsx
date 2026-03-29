@@ -53,7 +53,7 @@ interface TabDef {
 const TABS: TabDef[] = [
   { id: 'response_mode', label: 'Personality', icon: Theater, section: 'response_mode' },
   { id: 'tts', label: 'TTS', icon: Headphones, section: 'response_mode' },
-  { id: 'detection', label: 'Detection', icon: Clock, section: 'conditions' },
+  { id: 'detection', label: 'Schedule', icon: Clock, section: 'conditions' },
   { id: 'zones', label: 'Camera Zones', icon: MapPin, section: 'conditions' },
   { id: 'pipeline', label: 'Pipeline', icon: Layers, section: 'stages' },
   { id: 'ai', label: 'AI Provider', icon: Brain, section: 'ai' },
