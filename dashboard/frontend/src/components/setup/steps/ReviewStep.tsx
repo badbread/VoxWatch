@@ -25,7 +25,7 @@ import {
   Shield,
   Minus,
 } from 'lucide-react';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/utils/cn';
 import { generateConfig } from '@/api/setup';
@@ -69,6 +69,7 @@ function ReviewRow({
  */
 export function ReviewStep({ state }: ReviewStepProps) {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [countdown, setCountdown] = useState<number | null>(null);
 
   const enabledCameras = Object.entries(state.selectedCameras).filter(([, v]) => v.enabled);
@@ -105,6 +106,9 @@ export function ReviewStep({ state }: ReviewStepProps) {
   useEffect(() => {
     if (countdown === null) return;
     if (countdown === 0) {
+      // Invalidate the setup-status cache so the SetupGuard re-checks
+      // and sees config_exists=true instead of using the stale cached value.
+      queryClient.invalidateQueries({ queryKey: ['setup-status'] });
       navigate('/');
       return;
     }
