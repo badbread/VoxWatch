@@ -947,17 +947,53 @@ class VoxWatchService:
             ai_description: str | None = await ai_prep_task
             _escalation_description = ai_description
 
-            s_esc_description, s_esc_push_ok, s_esc_message = await self._run_escalation(
-                event_id, camera_name, camera_stream, mode_name, ai_description,
-                _active_mode_obj.voice,
-            )
-            # Use the more detailed description if the escalation stage got one
-            if s_esc_description:
-                _escalation_description = s_esc_description
-            _escalation_message = s_esc_message
-            _escalation_audio_success = s_esc_push_ok
-            if s_esc_push_ok:
-                record_audio_push(self._camera_stats, camera_name, s_esc_push_ok)
+            # AI validation: if the AI couldn't identify anyone (all fields
+            # are "unknown"), this is likely a Frigate false positive.  Skip
+            # the escalation to avoid playing a dispatch call for nobody.
+            _skip_escalation = False
+            if ai_description and '"unknown"' in ai_description:
+                import json as _json
+                try:
+                    _cleaned = ai_description.strip()
+                    if _cleaned.startswith("```"):
+                        _lines = _cleaned.splitlines()
+                        _inner = _lines[1:]
+                        if _inner and _inner[-1].strip().startswith("```"):
+                            _inner = _inner[:-1]
+                        _cleaned = "\n".join(_inner).strip()
+                    _parsed = _json.loads(_cleaned)
+                    if isinstance(_parsed, dict):
+                        _desc = _parsed.get("description", "").strip().lower()
+                        _loc = _parsed.get("location", "").strip().lower()
+                        if _desc in ("unknown", "") and _loc in ("unknown", ""):
+                            logger.info(
+                                "Escalation: AI returned all-unknown description — "
+                                "likely false positive from Frigate. Skipping escalation."
+                            )
+                            _skip_escalation = True
+                            _escalation_ran = False
+                            if self._publisher:
+                                self._publisher.publish_error(
+                                    camera=camera_name,
+                                    error_type="false_positive",
+                                    error_message="AI could not identify anyone in snapshots — likely Frigate false positive",
+                                    fallback_used=False,
+                                )
+                except Exception:
+                    pass  # JSON parse failed — proceed with escalation anyway
+
+            if not _skip_escalation:
+                s_esc_description, s_esc_push_ok, s_esc_message = await self._run_escalation(
+                    event_id, camera_name, camera_stream, mode_name, ai_description,
+                    _active_mode_obj.voice,
+                )
+                # Use the more detailed description if the escalation stage got one
+                if s_esc_description:
+                    _escalation_description = s_esc_description
+                _escalation_message = s_esc_message
+                _escalation_audio_success = s_esc_push_ok
+                if s_esc_push_ok:
+                    record_audio_push(self._camera_stats, camera_name, s_esc_push_ok)
 
             # ── MQTT: publish stage 2 ──────────────────────────────────────
             if self._publisher and _escalation_ran:
