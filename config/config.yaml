@@ -33,6 +33,14 @@ cameras:
   #   go2rtc_stream: "backyard"
   #   audio_codec: "pcm_alaw"   # Dahua camera — uses A-law instead of mu-law
 
+# Camera Zones — group cameras by physical area.
+# All cameras in a zone share a single cooldown and route audio to one speaker.
+# zones:
+#   front:
+#     cameras: [frontdoor, frontyard, driveway]
+#     speaker: frontdoor
+#     cooldown_seconds: 180
+
 # Detection conditions — all must be true to trigger the deterrent
 conditions:
   min_score: 0.7               # Minimum Frigate detection confidence (0.0-1.0)

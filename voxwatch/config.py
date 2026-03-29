@@ -70,6 +70,9 @@ def _apply_defaults(config: dict) -> dict:
     Returns:
         Config dict with defaults filled in.
     """
+    # Zones default to empty (no zones configured)
+    config.setdefault("zones", None)
+
     # Detection conditions defaults
     conditions = config.setdefault("conditions", {})
     conditions.setdefault("min_score", 0.7)

@@ -64,6 +64,16 @@ export interface CameraSchedule {
   sunrise_offset_minutes?: number;
 }
 
+/** Camera zone — groups cameras by physical area. */
+export interface ZoneConfig {
+  /** Camera names in this zone. */
+  cameras: string[];
+  /** Which camera's speaker plays audio for this zone. Must be in cameras list. */
+  speaker: string;
+  /** Zone-specific cooldown in seconds. When undefined, uses global cooldown. */
+  cooldown_seconds?: number;
+}
+
 /** Per-camera configuration entry. Keys are Frigate camera names. */
 export interface CameraConfig {
   /** Whether this camera should participate in deterrent triggers. */
@@ -715,6 +725,8 @@ export interface VoxWatchConfig {
   go2rtc: Go2rtcConfig;
   /** Map of Frigate camera name → camera config. */
   cameras: Record<string, CameraConfig>;
+  /** Camera zones — group cameras by area for shared cooldown + speaker routing. */
+  zones?: Record<string, ZoneConfig>;
   conditions: ConditionsConfig;
   ai: AiConfig;
   stage2: Stage2Config;

@@ -18,6 +18,7 @@ import {
   // Mic and FileText removed — TTS/Logging sections restructured
   Theater,
   Headphones,
+  MapPin,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { Card } from '@/components/common/Card';
@@ -28,6 +29,7 @@ import { FrigateConfigForm } from './FrigateConfigForm';
 import { Go2rtcConfigForm } from './Go2rtcConfigForm';
 // CamerasConfigForm removed — camera config now lives on the Cameras page (/cameras)
 import { ConditionsConfigForm } from './ConditionsConfigForm';
+import { ZonesConfigForm } from './ZonesConfigForm';
 import { AiConfigForm } from './AiConfigForm';
 import { StagesConfigForm } from './StagesConfigForm';
 import { TtsConfigForm } from './TtsConfigForm';
@@ -52,6 +54,7 @@ const TABS: TabDef[] = [
   { id: 'response_mode', label: 'Personality', icon: Theater, section: 'response_mode' },
   { id: 'tts', label: 'TTS', icon: Headphones, section: 'response_mode' },
   { id: 'detection', label: 'Detection', icon: Clock, section: 'conditions' },
+  { id: 'zones', label: 'Camera Zones', icon: MapPin, section: 'conditions' },
   { id: 'pipeline', label: 'Pipeline', icon: Layers, section: 'stages' },
   { id: 'ai', label: 'AI Provider', icon: Brain, section: 'ai' },
   { id: 'services', label: 'Connections', icon: Server, section: 'frigate' },
@@ -270,6 +273,21 @@ export function ConfigEditor() {
                   onChange={(conditions) => handleChange({ conditions })}
                   onCamerasChange={(cameras) => handleChange({ cameras })}
                   errors={validationResult.errors}
+                />
+              )}
+              {activeTab === 'zones' && (
+                <ZonesConfigForm
+                  zones={localConfig.zones}
+                  cameras={localConfig.cameras}
+                  onChange={(zones) => {
+                    if (zones) {
+                      handleChange({ zones });
+                    } else {
+                      // Clear zones — spread without the key
+                      const { zones: _, ...rest } = localConfig;
+                      handleChange(rest as Partial<VoxWatchConfig>);
+                    }
+                  }}
                 />
               )}
               {activeTab === 'ai' && (

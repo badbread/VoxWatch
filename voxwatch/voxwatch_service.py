@@ -724,6 +724,27 @@ class VoxWatchService:
 
     # ── Pipeline orchestration ────────────────────────────────────────────────
 
+    def _resolve_zone(self, camera_name: str) -> tuple[str | None, dict | None]:
+        """Look up which zone (if any) a camera belongs to.
+
+        Args:
+            camera_name: Frigate camera name.
+
+        Returns:
+            Tuple of (zone_name, zone_config_dict) if the camera is in a zone,
+            or (None, None) if the camera is not in any zone.
+        """
+        zones = self.config.get("zones")
+        if not zones or not isinstance(zones, dict):
+            return None, None
+        for zone_name, zone_cfg in zones.items():
+            if not isinstance(zone_cfg, dict):
+                continue
+            cameras = zone_cfg.get("cameras", [])
+            if camera_name in cameras:
+                return zone_name, zone_cfg
+        return None, None
+
     async def _handle_detection(self, event_data: dict) -> None:
         """Main deterrent pipeline — called for every qualifying MQTT event.
 
@@ -795,20 +816,43 @@ class VoxWatchService:
             )
             return
 
+        # ── Zone resolution ──────────────────────────────────────────────
+        zone_name, zone_cfg = self._resolve_zone(camera_name)
+        if zone_name:
+            logger.info("Camera %s is in zone '%s' (speaker: %s)",
+                        camera_name, zone_name, zone_cfg.get("speaker", camera_name))
+
         # ── Guard 4: cooldown ─────────────────────────────────────────────
-        cooldown_seconds = float(conditions.get("cooldown_seconds", 60))
-        if not check_cooldown(self._cooldowns, camera_name, cooldown_seconds, logger):
+        # Zone cameras share a cooldown keyed by zone name
+        if zone_name and zone_cfg:
+            cooldown_key = f"zone:{zone_name}"
+            cooldown_seconds = float(zone_cfg.get("cooldown_seconds") or conditions.get("cooldown_seconds", 60))
+        else:
+            cooldown_key = camera_name
+            cooldown_seconds = float(conditions.get("cooldown_seconds", 60))
+
+        if not check_cooldown(self._cooldowns, cooldown_key, cooldown_seconds, logger):
             logger.info(
-                "Event %s on %s: camera in cooldown.", event_id, camera_name
+                "Event %s on %s: %s in cooldown.",
+                event_id, camera_name,
+                f"zone '{zone_name}'" if zone_name else "camera",
             )
             return
 
         # Cooldown is now marked — subsequent events for this camera will be
         # skipped until cooldown_seconds has elapsed.
-        # Resolve audio output: prefer explicit override (audio_output), then
-        # the camera's own go2rtc stream, then fall back to the camera name.
-        audio_output = (camera_cfg.get("audio_output") or "").strip()
-        camera_stream = audio_output or camera_cfg.get("go2rtc_stream", camera_name)
+        # Resolve audio output: zone cameras route to zone speaker; otherwise
+        # prefer explicit override (audio_output), then the camera's own
+        # go2rtc stream, then fall back to the camera name.
+        if zone_name and zone_cfg:
+            speaker_name = zone_cfg.get("speaker", camera_name)
+            speaker_cfg = self.config.get("cameras", {}).get(speaker_name, {})
+            camera_stream = speaker_cfg.get("go2rtc_stream", speaker_name)
+            logger.info("Zone '%s': routing audio to speaker '%s' (stream: %s)",
+                        zone_name, speaker_name, camera_stream)
+        else:
+            audio_output = (camera_cfg.get("audio_output") or "").strip()
+            camera_stream = audio_output or camera_cfg.get("go2rtc_stream", camera_name)
 
         logger.info(
             "Handling detection: event=%s camera=%s score=%.2f",

@@ -801,6 +801,34 @@ class LoggingConfig(BaseModel):
     )
 
 
+# ── Zone Section ─────────────────────────────────────────────────────────────
+
+class ZoneConfig(BaseModel):
+    """Camera zone — groups cameras by physical area.
+
+    All cameras in a zone share a single cooldown timer. Audio is
+    routed to the designated speaker camera regardless of which
+    camera in the zone triggered the detection.
+    """
+
+    cameras: list[str] = Field(
+        description="List of camera names in this zone."
+    )
+    speaker: str = Field(
+        description="Which camera's speaker plays audio for this zone."
+    )
+    cooldown_seconds: int | None = Field(
+        default=None,
+        description="Zone-specific cooldown in seconds. When None, uses global cooldown."
+    )
+
+    @model_validator(mode='after')
+    def speaker_must_be_in_cameras(self) -> ZoneConfig:
+        if self.speaker not in self.cameras:
+            raise ValueError(f"Speaker '{self.speaker}' must be one of the zone cameras: {self.cameras}")
+        return self
+
+
 # ── Root Config ───────────────────────────────────────────────────────────────
 
 class VoxWatchConfig(BaseModel):
@@ -822,6 +850,10 @@ class VoxWatchConfig(BaseModel):
     cameras: dict[str, CameraConfig] = Field(
         default_factory=dict,
         description="Map of camera name -> camera config (name must match Frigate camera name)",
+    )
+    zones: dict[str, ZoneConfig] | None = Field(
+        default=None,
+        description="Camera zones — group cameras by physical area for shared cooldown and speaker routing.",
     )
     conditions: ConditionsConfig = Field(
         default_factory=ConditionsConfig,
