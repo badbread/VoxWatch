@@ -43,6 +43,12 @@ Uncomment the `build:` lines in `docker-compose.yml` and comment out the `image:
 
 ---
 
+![VoxWatch Dashboard](docs/images/dashboard.png)
+
+![Detection Pipeline](docs/images/pipeline.png)
+
+---
+
 ## How It Works
 
 ```
