@@ -121,6 +121,7 @@ export function CameraDetail({ camera, onBack }: CameraDetailProps) {
   // report URL can include them without an extra API call.
   const { status } = useServiceStatus();
 
+
   // Mutation: identify camera model via ONVIF
   const identifyMutation = useMutation({
     mutationFn: () => identifyCamera(camera.name),
@@ -370,6 +371,10 @@ interface VoxWatchEditPanelProps {
 function VoxWatchEditPanel({ camera }: VoxWatchEditPanelProps) {
   const queryClient = useQueryClient();
   const addToast = useStore((s) => s.addToast);
+  const { status: svcStatus } = useServiceStatus();
+  const otherCameraNames: string[] = (svcStatus?.cameras ?? [])
+    .map((c) => c.name)
+    .filter((n) => n !== camera.name);
 
   // Local draft state seeded from the current saved config.
   // We fetch the config once so we can read the full CameraConfig struct
@@ -485,6 +490,24 @@ function VoxWatchEditPanel({ camera }: VoxWatchEditPanelProps) {
           className={inputCls(false)}
           disabled={isBusy}
         />
+      </Field>
+
+      {/* Audio output speaker override */}
+      <Field label="Audio Output Speaker">
+        <select
+          value={draft.audio_output ?? ''}
+          onChange={(e) => setDraft((prev) => ({ ...prev, audio_output: e.target.value || '' }))}
+          className={inputCls(false)}
+          disabled={isBusy}
+        >
+          <option value="">Same camera (default)</option>
+          {otherCameraNames.map((n) => (
+              <option key={n} value={n}>{n}</option>
+            ))}
+        </select>
+        <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+          Which camera speaker plays audio when this camera detects someone.
+        </p>
       </Field>
 
       {/* Scene context */}
