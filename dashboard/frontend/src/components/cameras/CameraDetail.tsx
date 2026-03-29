@@ -166,7 +166,13 @@ export function CameraDetail({ camera, onBack }: CameraDetailProps) {
     },
   });
 
-  const hasBackchannel = camera.has_backchannel === true || overrideBackchannel;
+  // Trust ONVIF identification if it confirmed a speaker, even when go2rtc
+  // doesn't detect a backchannel track on the current stream profile.
+  // Also trust that cameras already configured in VoxWatch have working audio
+  // (the user already tested it during setup).
+  const onvifConfirmedSpeaker = identifyResult?.speaker_status === 'built_in';
+  const hasBackchannel = camera.has_backchannel === true || overrideBackchannel
+    || onvifConfirmedSpeaker || camera.enabled;
 
   // Resolve speaker capability from identification result
   const effectiveAck = externalSpeakerAck || overrideBackchannel;
