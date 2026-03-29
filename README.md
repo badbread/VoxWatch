@@ -20,14 +20,26 @@ That's what an intruder hears. Not a beep. Not silence. A specific, real-time ca
 ## Quick Start
 
 ```bash
-git clone https://github.com/badbread/VoxWatch.git
-cd VoxWatch
+mkdir voxwatch && cd voxwatch
+curl -sL https://raw.githubusercontent.com/badbread/VoxWatch/main/docker-compose.yml -o docker-compose.yml
 docker compose up -d
 ```
 
-Open `http://your-host:33344` — the setup wizard auto-discovers Frigate, MQTT, and your cameras, then walks you through AI provider, TTS engine, and response mode selection. No manual config needed for first run.
+That's it. Open `http://your-host:33344` — the setup wizard auto-discovers Frigate, MQTT, and your cameras, then walks you through AI provider, TTS engine, and response mode selection. No config files to edit.
 
-**Prerequisites:** [Frigate NVR](https://frigate.video) + MQTT broker + [go2rtc](https://github.com/AlexxIT/go2rtc) + a camera with a speaker.
+**Prerequisites:** [Frigate NVR](https://frigate.video) with MQTT + [go2rtc](https://github.com/AlexxIT/go2rtc) + a camera with two-way audio.
+
+<details>
+<summary><strong>Build from source instead</strong></summary>
+
+```bash
+git clone https://github.com/badbread/VoxWatch.git
+cd VoxWatch
+docker compose up -d --build
+```
+
+Uncomment the `build:` lines in `docker-compose.yml` and comment out the `image:` lines.
+</details>
 
 ---
 
