@@ -38,6 +38,8 @@ interface CameraCardProps {
   onUpdate: (patch: Partial<CameraConfig>) => void;
   /** Called when the remove button is clicked. */
   onRemove: () => void;
+  /** All camera names in the config — used to populate the audio output dropdown. */
+  allCameraNames: string[];
 }
 
 /**
@@ -47,7 +49,7 @@ interface CameraCardProps {
  * is collapsed by default (most users won't need it) and each card is
  * independently expandable without lifting state to the parent.
  */
-function CameraCard({ name, cam, errors, onUpdate, onRemove }: CameraCardProps) {
+function CameraCard({ name, cam, errors, onUpdate, onRemove, allCameraNames }: CameraCardProps) {
   const [audioExpanded, setAudioExpanded] = useState(false);
 
   const streamError = errors.find(
@@ -97,6 +99,28 @@ function CameraCard({ name, cam, errors, onUpdate, onRemove }: CameraCardProps) 
           placeholder={name}
           className={inputCls(!!streamError)}
         />
+      </Field>
+
+      {/* Audio output speaker override */}
+      <Field
+        label="Audio Output Speaker"
+        hint="Which camera speaker plays audio when this camera detects someone. Leave as 'Same camera' to use this camera's own speaker."
+      >
+        <select
+          value={cam.audio_output ?? ''}
+          onChange={(e) => {
+            const val = e.target.value;
+            onUpdate(val ? { audio_output: val } : { audio_output: '' });
+          }}
+          className={inputCls(false)}
+        >
+          <option value="">Same camera (default)</option>
+          {allCameraNames
+            .filter((n) => n !== name)
+            .map((n) => (
+              <option key={n} value={n}>{n}</option>
+            ))}
+        </select>
       </Field>
 
       {/* Scene context */}
@@ -287,6 +311,7 @@ export function CamerasConfigForm({
               errors={errors}
               onUpdate={(patch) => updateCamera(name, patch)}
               onRemove={() => removeCamera(name)}
+              allCameraNames={cameraNames}
             />
           );
         })}

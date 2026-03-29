@@ -804,7 +804,10 @@ class VoxWatchService:
 
         # Cooldown is now marked — subsequent events for this camera will be
         # skipped until cooldown_seconds has elapsed.
-        camera_stream = camera_cfg.get("go2rtc_stream", camera_name)
+        # Resolve audio output: prefer explicit override (audio_output), then
+        # the camera's own go2rtc stream, then fall back to the camera name.
+        audio_output = (camera_cfg.get("audio_output") or "").strip()
+        camera_stream = audio_output or camera_cfg.get("go2rtc_stream", camera_name)
 
         logger.info(
             "Handling detection: event=%s camera=%s score=%.2f",

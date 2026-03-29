@@ -71,6 +71,14 @@ class CameraConfig(BaseModel):
         default="",
         description="Stream name in go2rtc config — used for audio push target",
     )
+    audio_output: str | None = Field(
+        default=None,
+        description=(
+            "Override which camera speaker plays audio when this camera detects someone. "
+            "Set to another camera's go2rtc stream name to route audio to a different speaker. "
+            "When empty or None, audio plays through this camera's own speaker."
+        ),
+    )
     scene_context: str = Field(
         default="",
         description=(

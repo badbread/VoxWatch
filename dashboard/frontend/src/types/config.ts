@@ -39,6 +39,12 @@ export interface CameraConfig {
   enabled: boolean;
   /** Stream name in the go2rtc configuration (used for audio push). */
   go2rtc_stream: string;
+  /**
+   * Override which camera speaker plays audio when this camera detects someone.
+   * Set to another camera's go2rtc stream name to route audio to a different speaker.
+   * When empty or undefined, audio plays through this camera's own speaker.
+   */
+  audio_output?: string;
   /** Scene context describing the camera's field of view for AI spatial awareness. */
   scene_context?: string;
   /**
