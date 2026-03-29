@@ -1301,10 +1301,10 @@ class VoxWatchService:
         ai_phrases = _try_parse_phrase_list(ai_description)
 
         if cadence_enabled and ai_phrases:
-            # Build the full phrase list: template phrase + AI phrases.
-            # The escalation_message may itself be a single short sentence, so
-            # we prepend it as the first element.
-            full_phrases = [escalation_message] + ai_phrases
+            # Use the AI phrases directly for natural cadence.
+            # Do NOT prepend escalation_message — it's already the joined
+            # version of these same phrases, so prepending would duplicate.
+            full_phrases = ai_phrases
             import os as _os
             cadence_path = _os.path.join(
                 self._audio._serve_dir, "escalation_cadence_tts.wav"

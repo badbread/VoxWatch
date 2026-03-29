@@ -30,6 +30,46 @@ import {
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { getRecentEvents } from '@/api/status';
+
+/**
+ * Clean up raw AI description for display.
+ * The AI may return JSON arrays, markdown-fenced JSON, or dispatch JSON objects.
+ * This extracts readable text from any of those formats.
+ */
+function formatAiDescription(raw: string): string {
+  const trimmed = raw.trim();
+
+  // Strip markdown fences
+  let cleaned = trimmed;
+  if (cleaned.startsWith('```')) {
+    const lines = cleaned.split('\n');
+    const inner = lines.slice(1);
+    if (inner.length > 0 && inner[inner.length - 1]?.trim().startsWith('```')) {
+      inner.pop();
+    }
+    cleaned = inner.join('\n').trim();
+  }
+
+  // Try JSON array: ["phrase1", "phrase2"]
+  try {
+    const parsed = JSON.parse(cleaned);
+    if (Array.isArray(parsed) && parsed.every((p: unknown) => typeof p === 'string')) {
+      return parsed.join(' ');
+    }
+    // JSON object (dispatch format): extract description + location
+    if (typeof parsed === 'object' && parsed !== null) {
+      const parts: string[] = [];
+      if (parsed.description && parsed.description !== 'unknown') parts.push(parsed.description);
+      if (parsed.location && parsed.location !== 'unknown') parts.push(parsed.location);
+      if (parsed.behavior) parts.push(parsed.behavior);
+      if (parts.length > 0) return parts.join('. ');
+    }
+  } catch {
+    // Not JSON — use as-is
+  }
+
+  return cleaned;
+}
 import type { DetectionEvent } from '@/api/status';
 
 // ---------------------------------------------------------------------------
@@ -185,7 +225,7 @@ function EventDetail({ event }: EventDetailProps) {
             AI Analysis
           </div>
           <p className="text-gray-200 leading-relaxed">
-            &ldquo;{event.escalation_description}&rdquo;
+            &ldquo;{formatAiDescription(event.escalation_description ?? '')}&rdquo;
           </p>
         </div>
       )}
