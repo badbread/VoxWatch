@@ -63,6 +63,7 @@ from voxwatch.audio_pipeline import AudioPipeline
 from voxwatch.conditions import (
     check_cooldown,
     is_active_hours,
+    is_camera_active,
 )
 from voxwatch.config import reload_config
 from voxwatch.modes import (
@@ -787,8 +788,8 @@ class VoxWatchService:
             )
             return
 
-        # ── Guard 3: active hours ─────────────────────────────────────────
-        if not is_active_hours(self.config, logger):
+        # ── Guard 3: active hours (per-camera schedule or global fallback) ──
+        if not is_camera_active(self.config, camera_name, logger):
             logger.info(
                 "Event %s on %s: outside active hours.", event_id, camera_name
             )

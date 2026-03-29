@@ -33,6 +33,37 @@ export interface Go2rtcConfig {
   api_port: number;
 }
 
+/**
+ * Per-camera detection schedule.
+ *
+ * When present on a camera config, this schedule takes priority over the
+ * global `conditions.active_hours` setting for that camera only.
+ * Omit (or set to undefined) to use the global schedule.
+ */
+export interface CameraSchedule {
+  /**
+   * Schedule mode:
+   *   "always"          — camera is active 24/7 regardless of global schedule
+   *   "scheduled"       — active within a fixed start/end time window
+   *   "sunset_sunrise"  — active from sunset to sunrise (with optional offsets)
+   */
+  mode: 'always' | 'scheduled' | 'sunset_sunrise';
+  /** Start time in HH:MM 24-hour format (used when mode is "scheduled"). */
+  start?: string;
+  /** End time in HH:MM 24-hour format (used when mode is "scheduled"). */
+  end?: string;
+  /**
+   * Minutes offset applied to sunset. Negative = window starts before sunset.
+   * Only used when mode is "sunset_sunrise".
+   */
+  sunset_offset_minutes?: number;
+  /**
+   * Minutes offset applied to sunrise. Positive = window ends after sunrise.
+   * Only used when mode is "sunset_sunrise".
+   */
+  sunrise_offset_minutes?: number;
+}
+
 /** Per-camera configuration entry. Keys are Frigate camera names. */
 export interface CameraConfig {
   /** Whether this camera should participate in deterrent triggers. */
@@ -64,6 +95,12 @@ export interface CameraConfig {
    * Leave undefined to inherit the global `audio.channels` value.
    */
   channels?: number | undefined;
+  /**
+   * Per-camera detection schedule.
+   * When set, this overrides the global `conditions.active_hours` for this
+   * camera only. Omit or leave undefined to use the global schedule.
+   */
+  schedule?: CameraSchedule;
 }
 
 /** Active-hours window definition. */
@@ -89,10 +126,28 @@ export interface ConditionsConfig {
   cooldown_seconds: number;
   /** Active-hours configuration. */
   active_hours: ActiveHoursConfig;
+  /**
+   * City name for sunset/sunrise lookup (e.g. "San Francisco").
+   * Takes precedence over latitude/longitude when set.
+   * Leave empty to use explicit lat/lon instead.
+   */
+  city?: string;
   /** Latitude for sunset/sunrise calculations. */
   latitude: number;
   /** Longitude for sunset/sunrise calculations. */
   longitude: number;
+  /**
+   * Global minutes offset applied to sunset.
+   * Negative = window starts before sunset.
+   * Applied when active_hours.mode is "sunset_sunrise".
+   */
+  sunset_offset_minutes?: number;
+  /**
+   * Global minutes offset applied to sunrise.
+   * Positive = window ends after sunrise.
+   * Applied when active_hours.mode is "sunset_sunrise".
+   */
+  sunrise_offset_minutes?: number;
 }
 
 /**

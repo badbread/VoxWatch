@@ -67,7 +67,12 @@ def is_active_hours(config: dict[str, Any], _logger: logging.Logger = logger) ->
         return True
 
     if mode == "sunset_sunrise":
-        return is_between_sunset_and_sunrise(config, _logger)
+        return is_between_sunset_and_sunrise(
+            config,
+            _logger,
+            sunset_offset_minutes=int(conditions.get("sunset_offset_minutes", 0)),
+            sunrise_offset_minutes=int(conditions.get("sunrise_offset_minutes", 0)),
+        )
 
     if mode == "fixed":
         return is_in_fixed_window(
@@ -83,24 +88,87 @@ def is_active_hours(config: dict[str, Any], _logger: logging.Logger = logger) ->
     return True
 
 
+def _resolve_location(
+    conditions: dict[str, Any],
+    _logger: logging.Logger = logger,
+) -> "tuple[float, float]":
+    """Resolve a (latitude, longitude) pair from multiple config sources.
+
+    Resolution priority:
+      1. ``conditions.city`` — looked up via ``astral.geocoder`` if available.
+      2. ``conditions.latitude`` + ``conditions.longitude`` — explicit coords.
+
+    Returns the best available coordinates, defaulting to San Francisco
+    (37.7749, -122.4194) if nothing is configured.
+
+    Args:
+        conditions: The ``conditions`` sub-dict from the VoxWatch config.
+        _logger: Logger instance for debug/warning output.
+
+    Returns:
+        A ``(latitude, longitude)`` tuple of floats.
+    """
+    city_name = conditions.get("city", "").strip()
+    if city_name:
+        try:
+            from astral.geocoder import database, lookup
+
+            city_info = lookup(city_name, database())
+            _logger.debug(
+                "Resolved city '%s' to lat=%.4f lon=%.4f via astral geocoder.",
+                city_name,
+                city_info.latitude,
+                city_info.longitude,
+            )
+            return float(city_info.latitude), float(city_info.longitude)
+        except Exception as exc:
+            _logger.warning(
+                "Could not resolve city '%s' via astral geocoder (%s) — "
+                "falling back to lat/lon.",
+                city_name,
+                exc,
+            )
+
+    lat = float(conditions.get("latitude", 37.7749))
+    lon = float(conditions.get("longitude", -122.4194))
+    return lat, lon
+
+
 def is_between_sunset_and_sunrise(
-    config: dict[str, Any], _logger: logging.Logger = logger
+    config: dict[str, Any],
+    _logger: logging.Logger = logger,
+    sunset_offset_minutes: int = 0,
+    sunrise_offset_minutes: int = 0,
 ) -> bool:
     """Return True if the current UTC time is between today's sunset and tomorrow's sunrise.
 
     Uses the ``astral`` library to compute solar events at the configured
-    latitude/longitude.  If ``astral`` is unavailable or the calculation fails,
-    defaults to returning True (always active) so the service degrades
-    gracefully rather than silently ignoring detections.
+    location.  Location is resolved from ``conditions.city`` first; if that
+    fails or is absent, ``conditions.latitude`` / ``conditions.longitude`` are
+    used instead.
+
+    Optional offset parameters shift the effective sunset/sunrise boundaries:
+      - A negative ``sunset_offset_minutes`` means the window starts that many
+        minutes *before* actual sunset (e.g. -30 = 30 min before sunset).
+      - A positive ``sunrise_offset_minutes`` means the window ends that many
+        minutes *after* actual sunrise (e.g. 30 = 30 min after sunrise).
+
+    If ``astral`` is unavailable or the calculation fails, defaults to returning
+    True (always active) so the service degrades gracefully rather than
+    silently ignoring detections.
 
     Args:
-        config: Full VoxWatch config dict.  The ``conditions`` sub-dict is
-            expected to contain ``latitude`` and ``longitude`` float values.
+        config: Full VoxWatch config dict.
         _logger: Logger instance for warnings/debug output.
+        sunset_offset_minutes: Minutes to shift the sunset boundary.
+            Negative values push the window start earlier.
+        sunrise_offset_minutes: Minutes to shift the sunrise boundary.
+            Positive values extend the window end later.
 
     Returns:
         True if the current time is in the nighttime window (post-sunset,
-        pre-sunrise), or True if the calculation could not be completed.
+        pre-sunrise with offsets applied), or True if the calculation could
+        not be completed.
     """
     try:
         from astral import LocationInfo
@@ -114,8 +182,7 @@ def is_between_sunset_and_sunrise(
 
     try:
         conditions = config.get("conditions", {})
-        lat = float(conditions.get("latitude", 37.7749))
-        lon = float(conditions.get("longitude", -122.4194))
+        lat, lon = _resolve_location(conditions, _logger)
 
         location = LocationInfo(
             name="voxwatch",
@@ -135,18 +202,24 @@ def is_between_sunset_and_sunrise(
             tzinfo=UTC,
         )
 
-        sunset_today = sun_today["sunset"]
-        sunrise_tomorrow = sun_tomorrow["sunrise"]
+        # Apply offsets to the effective window boundaries.
+        sunset_today = sun_today["sunset"] + timedelta(minutes=sunset_offset_minutes)
+        sunrise_today = sun_today["sunrise"] + timedelta(minutes=sunrise_offset_minutes)
+        sunrise_tomorrow = sun_tomorrow["sunrise"] + timedelta(
+            minutes=sunrise_offset_minutes
+        )
 
         # Nighttime window: sunset (today) <= now < sunrise (tomorrow).
         # The ``or`` handles the case where now < sunrise of today (pre-dawn).
-        is_night = now_utc >= sunset_today or now_utc < sun_today["sunrise"]
+        is_night = now_utc >= sunset_today or now_utc < sunrise_today
 
         _logger.debug(
-            "Astral: now=%s sunset=%s sunrise=%s is_night=%s",
+            "Astral: now=%s sunset=%s (offset %+dm) sunrise=%s (offset %+dm) is_night=%s",
             now_utc.strftime("%H:%M:%S UTC"),
             sunset_today.strftime("%H:%M UTC"),
+            sunset_offset_minutes,
             sunrise_tomorrow.strftime("%H:%M UTC"),
+            sunrise_offset_minutes,
             is_night,
         )
         return is_night
@@ -248,4 +321,75 @@ def check_cooldown(
 
     # Not in cooldown — mark the trigger timestamp and allow the event.
     cooldowns[camera_name] = now
+    return True
+
+
+def is_camera_active(
+    config: dict[str, Any],
+    camera_name: str,
+    _logger: logging.Logger = logger,
+) -> bool:
+    """Check if a specific camera should be active right now.
+
+    Priority: per-camera schedule > global active_hours.
+
+    When the camera has a ``schedule`` block in its config, that schedule is
+    evaluated and the result is returned without consulting the global
+    ``conditions.active_hours`` setting.  When the camera has no ``schedule``
+    (or the schedule field is None/absent), the function falls back to the
+    global ``is_active_hours`` check so existing configs continue to work
+    unchanged.
+
+    Per-camera schedule modes:
+      - ``"always"``:         Camera is always active (ignores global schedule).
+      - ``"scheduled"``:      Active within the ``start``–``end`` time window.
+      - ``"sunset_sunrise"``: Active from sunset (+ ``sunset_offset_minutes``)
+                              to sunrise (+ ``sunrise_offset_minutes``).
+
+    Unknown per-camera modes default to active so a misconfiguration never
+    silently suppresses detections.
+
+    Args:
+        config: The full VoxWatch config dict.
+        camera_name: Name of the camera to check (must match the key in
+            ``config["cameras"]``).
+        _logger: Logger instance for debug/warning output.
+
+    Returns:
+        True if the camera should respond to detections right now.
+    """
+    cameras = config.get("cameras", {})
+    camera_cfg = cameras.get(camera_name, {})
+    schedule = camera_cfg.get("schedule")
+
+    # No per-camera schedule — fall back to the global active_hours check.
+    if not schedule:
+        return is_active_hours(config, _logger)
+
+    mode = schedule.get("mode", "always")
+
+    if mode == "always":
+        return True
+
+    if mode == "scheduled":
+        return is_in_fixed_window(
+            schedule.get("start", "22:00"),
+            schedule.get("end", "06:00"),
+            _logger,
+        )
+
+    if mode == "sunset_sunrise":
+        return is_between_sunset_and_sunrise(
+            config,
+            _logger,
+            sunset_offset_minutes=int(schedule.get("sunset_offset_minutes", 0)),
+            sunrise_offset_minutes=int(schedule.get("sunrise_offset_minutes", 0)),
+        )
+
+    # Unknown per-camera mode — default to active so we don't silently miss events.
+    _logger.warning(
+        "Camera '%s': unknown per-camera schedule mode '%s' — defaulting to active.",
+        camera_name,
+        mode,
+    )
     return True

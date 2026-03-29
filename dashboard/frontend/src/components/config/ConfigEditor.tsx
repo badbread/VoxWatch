@@ -266,7 +266,9 @@ export function ConfigEditor() {
               {activeTab === 'detection' && (
                 <ConditionsConfigForm
                   value={localConfig.conditions}
+                  cameras={localConfig.cameras}
                   onChange={(conditions) => handleChange({ conditions })}
+                  onCamerasChange={(cameras) => handleChange({ cameras })}
                   errors={validationResult.errors}
                 />
               )}

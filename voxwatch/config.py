@@ -78,8 +78,11 @@ def _apply_defaults(config: dict) -> dict:
     active_hours.setdefault("mode", "always")  # "always", "sunset_sunrise", or "fixed"
     active_hours.setdefault("start", "22:00")
     active_hours.setdefault("end", "06:00")
+    conditions.setdefault("city", "")
     conditions.setdefault("latitude", 37.7749)
     conditions.setdefault("longitude", -122.4194)
+    conditions.setdefault("sunset_offset_minutes", 0)
+    conditions.setdefault("sunrise_offset_minutes", 0)
 
     # AI vision defaults
     ai = config.setdefault("ai", {})

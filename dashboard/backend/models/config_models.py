@@ -52,6 +52,49 @@ class Go2rtcConfig(BaseModel):
 
 # ── Camera Section ────────────────────────────────────────────────────────────
 
+class CameraSchedule(BaseModel):
+    """Per-camera detection schedule.
+
+    Controls when an individual camera is allowed to trigger deterrent audio,
+    independently of the global ``conditions.active_hours`` setting.
+
+    Modes:
+      - ``always``:         Camera is active 24/7 (overrides global schedule).
+      - ``scheduled``:      Active within a fixed ``start``–``end`` time window.
+      - ``sunset_sunrise``: Active from sunset (+ offset) to sunrise (+ offset).
+    """
+
+    mode: str = Field(
+        default="always",
+        description=(
+            "Schedule mode: 'always' (24/7), 'scheduled' (fixed time window), "
+            "'sunset_sunrise' (nighttime only)"
+        ),
+    )
+    start: str = Field(
+        default="22:00",
+        description="Start time in HH:MM format (for 'scheduled' mode)",
+    )
+    end: str = Field(
+        default="06:00",
+        description="End time in HH:MM format (for 'scheduled' mode)",
+    )
+    sunset_offset_minutes: int = Field(
+        default=0,
+        description=(
+            "Minutes offset from sunset. Negative = before sunset. "
+            "(for 'sunset_sunrise' mode)"
+        ),
+    )
+    sunrise_offset_minutes: int = Field(
+        default=0,
+        description=(
+            "Minutes offset from sunrise. Positive = after sunrise. "
+            "(for 'sunset_sunrise' mode)"
+        ),
+    )
+
+
 class CameraConfig(BaseModel):
     """Per-camera configuration block.
 
@@ -113,6 +156,13 @@ class CameraConfig(BaseModel):
             "Leave None to inherit the global audio.channels value."
         ),
     )
+    schedule: CameraSchedule | None = Field(
+        default=None,
+        description=(
+            "Per-camera detection schedule. When None, uses the global "
+            "conditions.active_hours setting."
+        ),
+    )
 
 
 # ── Conditions Section ────────────────────────────────────────────────────────
@@ -160,6 +210,14 @@ class ConditionsConfig(BaseModel):
         default_factory=ActiveHoursConfig,
         description="Time-of-day schedule controlling when VoxWatch is active",
     )
+    city: str = Field(
+        default="",
+        description=(
+            "City name for sunset/sunrise lookup via the astral library "
+            "(e.g. 'San Francisco'). Takes precedence over latitude/longitude "
+            "when set. Leave empty to use lat/lon instead."
+        ),
+    )
     latitude: float = Field(
         default=37.7749,
         ge=-90.0,
@@ -171,6 +229,20 @@ class ConditionsConfig(BaseModel):
         ge=-180.0,
         le=180.0,
         description="Longitude for sunset/sunrise calculation (decimal degrees)",
+    )
+    sunset_offset_minutes: int = Field(
+        default=0,
+        description=(
+            "Global minutes offset from sunset. Negative = before sunset. "
+            "Applied when active_hours.mode is 'sunset_sunrise'."
+        ),
+    )
+    sunrise_offset_minutes: int = Field(
+        default=0,
+        description=(
+            "Global minutes offset from sunrise. Positive = after sunrise. "
+            "Applied when active_hours.mode is 'sunset_sunrise'."
+        ),
     )
 
 
