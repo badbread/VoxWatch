@@ -292,6 +292,8 @@ export interface PipelinePersistentDeterrence {
   alarm_tone: 'none' | 'brief' | 'continuous';
   describe_actions: boolean;
   escalation_tone: 'steady' | 'increasing';
+  /** Custom AI tone instructions per escalation tier. Distributed evenly across iterations. */
+  tone_levels?: string[];
 }
 
 export interface PipelineConfig {

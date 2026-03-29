@@ -1561,6 +1561,13 @@ class VoxWatchService:
         max_iter = int(persist_cfg.get("max_iterations", 5))
         describe = persist_cfg.get("describe_actions", True)
         tone_style = persist_cfg.get("escalation_tone", "increasing")
+        # Custom tone prompts per level — user can write their own AI tone
+        # instructions for each escalation tier.  Falls back to defaults.
+        tone_levels: list[str] = persist_cfg.get("tone_levels", [
+            "Tone: firm and direct.",
+            "Tone: stern and urgent.",
+            "Tone: very serious, final warning energy.",
+        ])
 
         iterations_completed = 0
 
@@ -1633,14 +1640,17 @@ class VoxWatchService:
                             "Respond with ONLY one sentence, under 25 words."
                         )
 
-                        # Adjust tone based on iteration depth.
-                        if tone_style == "increasing":
-                            if iteration <= 2:
-                                base_prompt += " Tone: firm and direct."
-                            elif iteration <= 4:
-                                base_prompt += " Tone: stern and urgent."
-                            else:
-                                base_prompt += " Tone: very serious, final warning energy."
+                        # Adjust tone based on iteration depth using configurable
+                        # tone level prompts.  Each level covers a range of iterations;
+                        # the last level repeats for all remaining iterations.
+                        if tone_style == "increasing" and tone_levels:
+                            # Distribute levels across max_iterations evenly.
+                            # e.g., 3 levels over 5 iterations: [0,0,1,1,2]
+                            level_idx = min(
+                                int(iteration * len(tone_levels) / max(max_iter, 1)),
+                                len(tone_levels) - 1,
+                            )
+                            base_prompt += f" {tone_levels[level_idx]}"
 
                         raw_description = await analyze_snapshots(
                             snapshots, base_prompt, self.config

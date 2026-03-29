@@ -276,6 +276,11 @@ def _apply_defaults(config: dict) -> dict:
     persistent.setdefault("alarm_tone", "none")  # "none", "brief", "continuous"
     persistent.setdefault("describe_actions", True)
     persistent.setdefault("escalation_tone", "increasing")  # "steady" or "increasing"
+    persistent.setdefault("tone_levels", [
+        "Tone: firm and direct.",
+        "Tone: stern and urgent.",
+        "Tone: very serious, final warning energy.",
+    ])
 
     # MQTT event publishing — VoxWatch publishes events for Home Assistant.
     mqtt_pub = config.setdefault("mqtt_publish", {})

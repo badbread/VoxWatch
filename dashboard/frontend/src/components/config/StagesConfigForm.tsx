@@ -681,6 +681,65 @@ export function StagesConfigForm({
               </select>
             </Field>
 
+            {(persistentDeterrence.escalation_tone ?? 'increasing') === 'increasing' && (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                  Tone Levels
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  AI tone instructions for each escalation tier. Levels are distributed evenly across iterations.
+                </p>
+                {(persistentDeterrence.tone_levels ?? [
+                  'Tone: firm and direct.',
+                  'Tone: stern and urgent.',
+                  'Tone: very serious, final warning energy.',
+                ]).map((level: string, i: number) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <span className="flex-shrink-0 text-xs font-medium text-gray-500 w-16">Level {i + 1}</span>
+                    <input
+                      type="text"
+                      value={level}
+                      onChange={(e) => {
+                        const levels = [...(persistentDeterrence.tone_levels ?? [
+                          'Tone: firm and direct.',
+                          'Tone: stern and urgent.',
+                          'Tone: very serious, final warning energy.',
+                        ])];
+                        levels[i] = e.target.value;
+                        updatePersistentDeterrence({ tone_levels: levels });
+                      }}
+                      className={inputCls(false)}
+                      placeholder={`Tone instruction for level ${i + 1}`}
+                    />
+                    {(persistentDeterrence.tone_levels ?? []).length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const levels = [...(persistentDeterrence.tone_levels ?? [])];
+                          levels.splice(i, 1);
+                          updatePersistentDeterrence({ tone_levels: levels });
+                        }}
+                        className="flex-shrink-0 text-xs text-red-400 hover:text-red-300"
+                      >
+                        remove
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const levels = [...(persistentDeterrence.tone_levels ?? [])];
+                    levels.push('Tone: ');
+                    updatePersistentDeterrence({ tone_levels: levels });
+                  }}
+                  className="text-xs font-medium text-blue-500 hover:text-blue-400"
+                >
+                  + Add level
+                </button>
+              </div>
+            )}
+
             <Field
               label="Alarm Tone"
               hint="Sound played before each deterrence message."
