@@ -109,12 +109,13 @@ jobs:
 
       - name: Check for credential patterns
         run: |
-          # Fail if obvious passwords appear in source (exclude this CI file)
-          if grep -rn "REDACTED\|REDACTED" \
+          # Fail if common credential patterns appear in source code.
+          # Checks for password/secret assignments with literal values.
+          if grep -rn 'password\s*[:=]\s*"[^$"][^"]\{6,\}"' \
             --include="*.py" --include="*.ts" --include="*.tsx" \
             --include="*.yaml" --include="*.yml" \
             --exclude-dir=node_modules --exclude-dir=.git \
-            --exclude="ci.yml"; then
-            echo "::error::Found hardcoded credentials!"
+            --exclude-dir=tests --exclude="ci.yml"; then
+            echo "::error::Found potential hardcoded credentials!"
             exit 1
           fi

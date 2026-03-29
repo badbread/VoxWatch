@@ -138,13 +138,13 @@ The WebRTC connection is established and RTP packets are being sent from our sid
 - **go2rtc version**: 1.9.10 (bundled with Frigate 0.17.0-93016c6)
 - **go2rtc host**: localhost:1984 (Docker container, host networking)
 - **Cameras tested**:
-  - Reolink CX410 (frontdoor, 192.168.1.100) — PoE Bullet, PCMU/8000 backchannel, warmup 10-13s
-  - Reolink CX420 (backdoor, 192.168.1.103) — PoE Bullet, PCMU/8000 backchannel, warmup 10-17s
-  - Reolink E1 Zoom (famroom, 192.168.1.101) — PoE PTZ, PCMU/8000 backchannel, warmup 5-7s, needs 1.5s silence padding
-  - Dahua IPC-Color4K-T180 (frontyard, 192.168.1.102) — PoE Turret, PCMA/8000 backchannel, no warmup, instant return
-  - Dahua IPC-T54IR-AS-2.8mm-S3 (backyard, 192.168.1.104) — PoE Turret, PCMA/8000 backchannel, RCA out only (no speaker)
-  - Dahua IPC-B54IR-ASE-2.8MM-S3 (sidegate, 192.168.1.105) — PoE Bullet, PCMA/8000 backchannel, RCA out only (no speaker)
-  - Dahua IPC-T58IR-ZE-S3 (driveway, 192.168.1.106) — PoE Turret, no audio (incompatible)
+  - Reolink CX410 — PoE Bullet, PCMU/8000 backchannel, warmup 10-13s
+  - Reolink CX420 — PoE Bullet, PCMU/8000 backchannel, warmup 10-17s
+  - Reolink E1 Zoom — PoE PTZ, PCMU/8000 backchannel, warmup 5-7s, needs 1.5s silence padding
+  - Dahua IPC-Color4K-T180 — PoE Turret, PCMA/8000 backchannel, no warmup, instant return
+  - Dahua IPC-T54IR-AS-2.8mm-S3 — PoE Turret, PCMA/8000 backchannel, RCA out only (no speaker)
+  - Dahua IPC-B54IR-ASE-2.8MM-S3 — PoE Bullet, PCMA/8000 backchannel, RCA out only (no speaker)
+  - Dahua IPC-T58IR-ZE-S3 — PoE Turret, no audio (incompatible)
 - **VoxWatch**: Python 3.11 in Docker container, same host as go2rtc
 - **TTS**: Kokoro-82M on remote server (localhost:8880), Piper as fallback
 - **Audio format**: PCMU (G.711 mu-law), 8000 Hz, mono, WAV container

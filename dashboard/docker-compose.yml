@@ -44,10 +44,10 @@ services:
 
     volumes:
       # Shared config — read-write so the config editor can save changes
-      - /volume1/docker/voxwatch/config:/config
+      - ./config:/config
 
       # Shared data — read-only for status.json and events.jsonl
-      - /volume1/docker/voxwatch/data:/data:ro
+      - ./data:/data:ro
 
     # Lightweight — the dashboard is just an API server + static files
     mem_limit: 256m
