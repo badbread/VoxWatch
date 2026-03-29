@@ -34,7 +34,10 @@ export function CameraStatusGrid({ onCameraClick, selectedName }: CameraStatusGr
     );
   }
 
-  const cameras = status?.cameras ?? [];
+  // Only show cameras that are actively monitored by VoxWatch (enabled===true).
+  // The status API merges Frigate-only and go2rtc-only cameras in with enabled=false
+  // so they appear on the Audio / Cameras pages without cluttering the dashboard.
+  const cameras = (status?.cameras ?? []).filter((c) => c.enabled);
 
   if (cameras.length === 0) {
     return (

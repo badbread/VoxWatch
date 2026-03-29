@@ -2,14 +2,13 @@
  * DashboardPage — live security monitoring hub.
  *
  * Redesigned from a config-heavy admin panel into a reactive status dashboard.
- * Five sections, top to bottom:
+ * Four sections, top to bottom:
  *
  *   1. System Hero        — full-width status card with pulsing dot, headline,
  *                           stat row, and most-recent detection event.
- *   2. Live Camera Grid   — visual card grid; clicking navigates to /cameras.
+ *   2. Camera Grid        — VoxWatch-enabled cameras only; clicking navigates to /cameras.
  *   3. Recent Activity    — stacked detection event feed derived from status API.
- *   4. Quick Actions      — three large nav buttons to the Tests page.
- *   5. Support Banner     — dismissible "consider supporting" card.
+ *   4. Support Footer     — minimal single-line coffee link.
  *
  * No new API calls — all data flows from `useServiceStatus()` and
  * `useConfigQuery()` which are already polling on a shared interval.
@@ -19,7 +18,6 @@ import { useNavigate } from 'react-router-dom';
 import { ServiceStatusCard } from '@/components/status/ServiceStatusCard';
 import { CameraStatusGrid } from '@/components/status/CameraStatusGrid';
 import { RecentActivity } from '@/components/status/RecentActivity';
-import { QuickActions } from '@/components/status/QuickActions';
 import { ErrorBoundary } from '@/components/common/ErrorBoundary';
 import { SupportCard } from '@/components/common/SupportCard';
 import type { CameraStatus } from '@/types/status';
@@ -46,10 +44,10 @@ export function DashboardPage() {
         <ServiceStatusCard />
       </ErrorBoundary>
 
-      {/* Section 2 — Live Camera Grid */}
+      {/* Section 2 — Camera Grid */}
       <div>
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-gray-400 dark:text-gray-600">
-          Live Cameras
+          Cameras
         </h2>
         <ErrorBoundary>
           <CameraStatusGrid onCameraClick={handleCameraClick} />
@@ -61,15 +59,7 @@ export function DashboardPage() {
         <RecentActivity />
       </ErrorBoundary>
 
-      {/* Section 4 — Quick Actions */}
-      <div>
-        <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-gray-400 dark:text-gray-600">
-          Quick Actions
-        </h2>
-        <QuickActions />
-      </div>
-
-      {/* Section 5 — Support Banner */}
+      {/* Section 4 — Support Footer */}
       <SupportCard />
 
     </div>

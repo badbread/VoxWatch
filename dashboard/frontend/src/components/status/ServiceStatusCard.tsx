@@ -85,8 +85,11 @@ export function ServiceStatusCard() {
       : { boxShadow: '0 0 32px rgba(239,68,68,0.08), 0 0 0 1px rgba(239,68,68,0.12)' };
 
   // Stats
+  // enabledCameras: cameras with enabled===true — these are the actively monitored
+  // VoxWatch cameras shown in the dashboard. Frigate-only / go2rtc-only cameras that
+  // have not been enrolled in VoxWatch are merged by the backend with enabled=false
+  // and are excluded from the count.
   const enabledCameras = cameras.filter((c) => c.enabled).length;
-  const totalCameras = cameras.length;
   const audioReady = go2rtc.reachable;
   const aiModel = config?.ai?.primary?.model ?? null;
   const aiConnected = frigate.reachable; // proxy for AI availability
@@ -132,23 +135,32 @@ export function ServiceStatusCard() {
           </div>
 
           {/* Subtext */}
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            Monitoring{' '}
-            <span className="font-semibold text-gray-900 dark:text-gray-200">{totalCameras}</span>{' '}
-            camera{totalCameras !== 1 ? 's' : ''}
-            {totalCameras > 0 && enabledCameras < totalCameras && (
-              <span className="ml-1 text-amber-400">
-                ({enabledCameras} enabled)
-              </span>
-            )}
-          </p>
+          {enabledCameras > 0 ? (
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              Monitoring{' '}
+              <span className="font-semibold text-gray-900 dark:text-gray-200">
+                {enabledCameras}
+              </span>{' '}
+              camera{enabledCameras !== 1 ? 's' : ''}
+            </p>
+          ) : (
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              No cameras configured —{' '}
+              <a
+                href="/cameras"
+                className="font-medium text-blue-500 hover:text-blue-400 dark:text-blue-400 dark:hover:text-blue-300"
+              >
+                Set up cameras →
+              </a>
+            </p>
+          )}
 
           {/* Stat pills row */}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs">
             <StatPill
               icon={<Video className="h-3.5 w-3.5" aria-hidden="true" />}
               label="Cameras"
-              value={`${enabledCameras}/${totalCameras}`}
+              value={String(enabledCameras)}
               ok={frigate.reachable}
             />
             <span className="text-gray-400 dark:text-gray-700" aria-hidden="true">·</span>
