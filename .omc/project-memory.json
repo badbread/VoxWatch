@@ -1,0 +1,146 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1774924612306,
+  "projectRoot": "X:\\voxwatch",
+  "techStack": {
+    "languages": [
+      {
+        "name": "Python",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "requirements.txt"
+        ]
+      }
+    ],
+    "frameworks": [],
+    "packageManager": "pip",
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": null,
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "assets",
+      "docs",
+      "tests"
+    ],
+    "gitBranches": null
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "assets": {
+      "path": "assets",
+      "purpose": "Static assets",
+      "fileCount": 1,
+      "lastAccessed": 1774924612265,
+      "keyFiles": [
+        "BRAND_CONTEXT.md"
+      ]
+    },
+    "branding": {
+      "path": "branding",
+      "purpose": null,
+      "fileCount": 12,
+      "lastAccessed": 1774924612267,
+      "keyFiles": [
+        "app-icon-dark.svg",
+        "app-icon-light.svg",
+        "icon-dark.svg",
+        "icon-light.svg",
+        "icon-mono-dark.svg"
+      ]
+    },
+    "config": {
+      "path": "config",
+      "purpose": "Configuration files",
+      "fileCount": 2,
+      "lastAccessed": 1774924612269,
+      "keyFiles": [
+        "config.yaml",
+        "deploy-config.yaml"
+      ]
+    },
+    "dashboard": {
+      "path": "dashboard",
+      "purpose": null,
+      "fileCount": 4,
+      "lastAccessed": 1774924612270,
+      "keyFiles": [
+        "docker-compose.yml",
+        "Dockerfile",
+        "entrypoint.sh"
+      ]
+    },
+    "docs": {
+      "path": "docs",
+      "purpose": "Documentation",
+      "fileCount": 6,
+      "lastAccessed": 1774924612272,
+      "keyFiles": [
+        "ARCHITECTURE.md",
+        "AUDIO_PUSH_RESEARCH.md",
+        "DEPLOYMENT.md",
+        "HOME_ASSISTANT.md",
+        "LEGAL.md"
+      ]
+    },
+    "tests": {
+      "path": "tests",
+      "purpose": "Test files",
+      "fileCount": 27,
+      "lastAccessed": 1774924612273,
+      "keyFiles": [
+        "custom_message.wav",
+        "custom_message_mulaw.wav",
+        "discovery.py",
+        "generate_test_audio.py",
+        "QA_BASELINE.md"
+      ]
+    },
+    "test_tts_output": {
+      "path": "test_tts_output",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1774924612275,
+      "keyFiles": [
+        "tts_pyttsx3.wav"
+      ]
+    },
+    "voxwatch": {
+      "path": "voxwatch",
+      "purpose": null,
+      "fileCount": 11,
+      "lastAccessed": 1774924612277,
+      "keyFiles": [
+        "audio_effects.py",
+        "audio_pipeline.py",
+        "conditions.py",
+        "config.py",
+        "mqtt_publisher.py"
+      ]
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "voxwatch\\tts\\providers\\kokoro_provider.py",
+      "accessCount": 17,
+      "lastAccessed": 1774924896793,
+      "type": "directory"
+    }
+  ],
+  "userDirectives": []
+}

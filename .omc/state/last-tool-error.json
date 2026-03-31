@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"cd X:/voxwatch && python -c \\\"import ast; ast.parse(open('voxwatch/tts/providers/kokoro_provider.py').read()); print('Syntax OK')\\\" && python -m ruff check voxwatch/tts/providers/kokoro_pr...",
+  "error": "Exit code 1\nSyntax OK\r\nF841 Local variable `gen_time` is assigned to but never used\n   --> voxwatch\\tts\\providers\\kokoro_provider.py:307:13\n    |\n305 |                     audio_data = await resp.read()\n306 |\n307 |             gen_time = \"?\"\n    |             ^^^^^^^^\n308 |             logger.debug(\n309 |                 \"Kokoro remote generated %d bytes\",\n    |\nhelp: Remove assignment to unused variable `gen_time`\n\nFound 1 error.\nNo fixes available (1 hidden fix can be enabled with the `--unsaf...",
+  "timestamp": "2026-03-31T02:40:21.327Z",
+  "retry_count": 1
+}

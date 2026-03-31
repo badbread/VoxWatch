@@ -169,18 +169,26 @@ class KokoroProvider(TTSProvider):
         """
         session = await self._get_session()
         try:
-            async with session.get(f"{self._host}/health") as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    logger.info(
-                        "Kokoro remote server connected: %s (model=%s)",
-                        self._host, data.get("model", "unknown"),
-                    )
-                else:
-                    logger.warning(
-                        "Kokoro server health check returned %d — will retry on generate",
-                        resp.status,
-                    )
+            # Try multiple health endpoints — Docker Kokoro uses /voices,
+            # older versions use /health.
+            connected = False
+            for health_url in (f"{self._host}/voices", f"{self._host}/health"):
+                try:
+                    async with session.get(health_url) as resp:
+                        if resp.status == 200:
+                            logger.info(
+                                "Kokoro remote server connected: %s",
+                                self._host,
+                            )
+                            connected = True
+                            break
+                except Exception:
+                    continue
+            if not connected:
+                logger.warning(
+                    "Kokoro server at %s health check failed — will retry on generate",
+                    self._host,
+                )
         except Exception as exc:
             logger.warning(
                 "Kokoro server at %s not reachable during warmup: %s — will retry on generate",
@@ -238,8 +246,9 @@ class KokoroProvider(TTSProvider):
     async def _generate_remote(self, message: str, output_path: str) -> TTSResult:
         """Generate speech via the remote Kokoro HTTP server.
 
-        Sends a POST to /tts with JSON body, receives WAV audio bytes,
-        and writes them to output_path.
+        Tries the OpenAI-compatible ``/v1/audio/speech`` endpoint first
+        (used by Docker-based Kokoro deployments).  Falls back to the
+        legacy ``/tts`` endpoint if the new one returns 404.
 
         Args:
             message: Text to synthesize.
@@ -253,33 +262,61 @@ class KokoroProvider(TTSProvider):
         """
         session = await self._get_session()
 
-        payload = {
-            "text": message,
-            "voice": self._voice,
-            "speed": self._speed,
-        }
+        audio_data: bytes | None = None
 
         try:
+            # ── Try OpenAI-compatible endpoint first ──────────────────────
+            openai_payload = {
+                "model": "kokoro",
+                "input": message,
+                "voice": self._voice,
+                "speed": self._speed,
+                "response_format": "wav",
+            }
             async with session.post(
-                f"{self._host}/tts",
-                json=payload,
+                f"{self._host}/v1/audio/speech",
+                json=openai_payload,
             ) as resp:
-                if resp.status != 200:
+                if resp.status == 404:
+                    # Endpoint doesn't exist — try legacy below
+                    logger.debug(
+                        "Kokoro /v1/audio/speech returned 404, trying legacy /tts"
+                    )
+                elif resp.status != 200:
                     body = await resp.text()
                     raise TTSProviderError(
                         self.name,
                         f"Kokoro server returned HTTP {resp.status}: {body[:200]}",
                     )
+                else:
+                    audio_data = await resp.read()
 
-                audio_data = await resp.read()
-                gen_time = resp.headers.get("X-Generation-Time", "?")
-                logger.debug(
-                    "Kokoro remote generated %d bytes in %ss",
-                    len(audio_data), gen_time,
-                )
+            # ── Fall back to legacy /tts endpoint ─────────────────────────
+            if audio_data is None:
+                legacy_payload = {
+                    "text": message,
+                    "voice": self._voice,
+                    "speed": self._speed,
+                }
+                async with session.post(
+                    f"{self._host}/tts",
+                    json=legacy_payload,
+                ) as resp:
+                    if resp.status != 200:
+                        body = await resp.text()
+                        raise TTSProviderError(
+                            self.name,
+                            f"Kokoro server returned HTTP {resp.status}: {body[:200]}",
+                        )
+                    audio_data = await resp.read()
 
-                with open(output_path, "wb") as f:
-                    f.write(audio_data)
+            logger.debug(
+                "Kokoro remote generated %d bytes",
+                len(audio_data),
+            )
+
+            with open(output_path, "wb") as f:
+                f.write(audio_data)
 
         except TTSProviderError:
             raise
