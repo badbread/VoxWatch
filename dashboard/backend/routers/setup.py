@@ -957,6 +957,7 @@ class TestServiceResult(BaseModel):
 )
 async def test_frigate(req: TestServiceRequest) -> TestServiceResult:
     """Test Frigate NVR connectivity by hitting /api/version."""
+    _validate_host(req.host, "host")
     t0 = time.monotonic()
     try:
         timeout = aiohttp.ClientTimeout(total=5)
@@ -997,6 +998,7 @@ async def test_frigate(req: TestServiceRequest) -> TestServiceResult:
 )
 async def test_mqtt(req: TestServiceRequest) -> TestServiceResult:
     """Test MQTT broker connectivity including authentication."""
+    _validate_host(req.host, "host")
     t0 = time.monotonic()
     result = await asyncio.to_thread(
         _probe_mqtt_sync, req.host, req.port, req.username, req.password
@@ -1025,6 +1027,7 @@ async def test_mqtt(req: TestServiceRequest) -> TestServiceResult:
 )
 async def test_go2rtc(req: TestServiceRequest) -> TestServiceResult:
     """Test go2rtc connectivity by hitting /api."""
+    _validate_host(req.host, "host")
     t0 = time.monotonic()
     try:
         timeout = aiohttp.ClientTimeout(total=5)

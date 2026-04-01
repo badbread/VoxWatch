@@ -24,3 +24,4 @@ Thumbs.db
 credentials.*
 config/deploy-config.yaml
 .claude/settings.local.json
+.omc/

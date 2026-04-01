@@ -233,7 +233,7 @@ function ProviderConfigPanel({ engineId, config, onChange }: ProviderConfigPanel
           type="password"
           value={config.api_key ?? ''}
           onChange={(e) => onChange({ ...config, api_key: e.target.value })}
-          placeholder="sk-..."
+          placeholder="Enter API key"
           autoComplete="off"
           className={inputCls}
         />
